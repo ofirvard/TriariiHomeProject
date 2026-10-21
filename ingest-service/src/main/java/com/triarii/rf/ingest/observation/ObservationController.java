@@ -26,13 +26,14 @@ public class ObservationController {
         this.service = service;
     }
 
-    /** 200 = all accepted, 207 = some rejected, 422 = all rejected. */
+    /**
+     * 200 if anything was stored, with per-item errors in the body for rejected items (as bulk APIs like
+     * Elasticsearch _bulk and Kinesis PutRecords do); 422 if nothing was stored.
+     */
     @PostMapping
     public ResponseEntity<IngestResult> ingest(@RequestBody JsonNode body) {
         IngestResult result = service.ingest(body);
-        HttpStatus status = result.rejected() == 0 ? HttpStatus.OK
-                : result.accepted() == 0 ? HttpStatus.UNPROCESSABLE_ENTITY
-                : HttpStatus.MULTI_STATUS;
+        HttpStatus status = result.accepted() > 0 ? HttpStatus.OK : HttpStatus.UNPROCESSABLE_ENTITY;
         return ResponseEntity.status(status).body(result);
     }
 

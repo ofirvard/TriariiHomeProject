@@ -60,7 +60,7 @@ class IngestApiIntegrationTest {
 
         ResponseEntity<JsonNode> response = post("/api/v1/observations", batch);
 
-        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.MULTI_STATUS);
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(response.getBody().get("accepted").asInt()).isEqualTo(2);
         assertThat(response.getBody().get("rejected").asInt()).isEqualTo(1);
         JsonNode error = response.getBody().get("errors").get(0);
