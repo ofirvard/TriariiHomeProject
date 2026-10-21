@@ -1,7 +1,7 @@
-# Stage: package both images from the jars CI built and push them to GHCR, tagged with the given tag
-# (the commit SHA). Version and latest tags are added by the release stage, only after verify passes.
+# Stage Build & Publish: build both images from the jars CI tested and push them to GHCR, tagged with the
+# commit SHA. Version and latest tags are added by Release, only after Verify passes on the VM.
 # Docker layers are cached, so an unchanged jar is not re-packaged.
-name: Publish
+name: Build & Publish
 
 on:
   workflow_call:

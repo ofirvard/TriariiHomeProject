@@ -1,8 +1,14 @@
-# Stage: lint and test. A failing check blocks the merge (required on main).
+# Stage CI: lint and run all tests. On pull requests "ci / Lint and test" is a required check, so a failing
+# test blocks the merge.
 name: CI
 
 on:
   workflow_call:
+    inputs:
+      package:
+        description: Also package the jars and hand them to Build & Publish
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -27,15 +33,15 @@ jobs:
         run: ./gradlew check
 
       - name: Lint shell scripts
-        run: shellcheck simulator.sh deploy/smoke-test.sh
+        run: shellcheck simulator.sh deploy/*.sh
 
-      # Package once; the publish stage ships exactly these tested jars instead of building again.
+      # Package once; Build & Publish ships exactly these tested jars instead of building again.
       - name: Package jars
-        if: github.event_name == 'push'
+        if: inputs.package
         run: ./gradlew bootJar
 
-      - name: Hand the jars to the publish stage
-        if: github.event_name == 'push'
+      - name: Hand the jars to Build & Publish
+        if: inputs.package
         uses: actions/upload-artifact@v4
         with:
           name: jars
