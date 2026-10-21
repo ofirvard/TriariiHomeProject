@@ -1,0 +1,91 @@
+# The deployed stack. Configuration comes from a .env file next to this file (never committed);
+# see .env.example. Only nginx publishes a port.
+name: rf-alert-manager
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+x-app-env: &app-env
+  DB_HOST: postgres
+  DB_NAME: ${DB_NAME:-rf}
+  DB_USER: ${DB_USER:?set DB_USER in .env}
+  DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+  RABBITMQ_HOST: rabbitmq
+  RABBITMQ_USER: ${RABBITMQ_USER:?set RABBITMQ_USER in .env}
+  RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in .env}
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      ingest-service: { condition: service_healthy }
+      alert-service: { condition: service_healthy }
+    restart: unless-stopped
+    logging: *logging
+
+  ingest-service:
+    image: ${REGISTRY:-ghcr.io/ofirvard/triariihomeproject}/ingest-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      args: { SERVICE: ingest-service }
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *logging
+
+  alert-service:
+    image: ${REGISTRY:-ghcr.io/ofirvard/triariihomeproject}/alert-service:${IMAGE_TAG:-local}
+    build:
+      context: .
+      args: { SERVICE: alert-service }
+    environment: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *logging
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-rf}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+
+  rabbitmq:
+    image: rabbitmq:3.13-alpine
+    hostname: rabbitmq   # RabbitMQ keys its data directory by node name, so it must be stable
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      retries: 10
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  pg-data:
+  rabbitmq-data:

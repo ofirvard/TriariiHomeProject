@@ -1,0 +1,12 @@
+# Only sources and the Gradle wrapper go into the build context; never local secrets.
+.env
+.git
+.gradle
+.idea
+**/build
+**/out
+*.pdf
+*.md
+deploy
+docker-compose*.yml
+simulate.sh

@@ -22,3 +22,8 @@ dependencies {
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.testcontainers:rabbitmq")
 }
+
+// Fixed name so one Dockerfile can copy the jar for either service.
+tasks.bootJar {
+    archiveFileName.set("app.jar")
+}
