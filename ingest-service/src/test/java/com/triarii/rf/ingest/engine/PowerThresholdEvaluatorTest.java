@@ -77,11 +77,27 @@ class PowerThresholdEvaluatorTest {
     }
 
     @Test
-    void sameSignalOnTwoSensorsSharesTheSignalKey() {
-        RuleMatchEvent a = feed("sensor-a", IntStream.rangeClosed(0, 10), 2437.02, -40).get(0);
-        RuleMatchEvent b = feed("sensor-b", IntStream.rangeClosed(0, 10), 2436.98, -45).get(0);
+    void anotherSensorJoiningAFiringSignalIsPublishedImmediately() {
+        RuleMatchEvent first = feed("sensor-a", IntStream.rangeClosed(0, 10), 2437.02, -40).get(0);
 
-        assertThat(a.signalKey()).isEqualTo(b.signalKey()).isEqualTo("rule-ism@2437.000");
+        // sensor-b only sees it for one observation, but the signal is already alerting
+        List<RuleMatchEvent> joined = feed("sensor-b", IntStream.of(11), 2436.98, -45);
+
+        assertThat(joined).hasSize(1);
+        assertThat(joined.get(0).signalKey()).isEqualTo(first.signalKey()).isEqualTo("rule-ism@2437.000");
+        assertThat(joined.get(0).observations().get(0).sensorId()).isEqualTo("sensor-b");
+    }
+
+    @Test
+    void persistenceIsPerSignalAcrossSensors() {
+        // two sensors alternating on the same emitter: together they cover 10 s
+        List<RuleMatchEvent> events = new ArrayList<>();
+        IntStream.rangeClosed(0, 10).forEach(s -> events.addAll(
+                feed(s % 2 == 0 ? "sensor-a" : "sensor-b", IntStream.of(s), 2437.0, -40)));
+
+        assertThat(events).hasSize(1);
+        assertThat(events.get(0).observations()).extracting(ObservationSnapshot::sensorId)
+                .containsOnly("sensor-a", "sensor-b");
     }
 
     @Test

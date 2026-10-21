@@ -19,7 +19,9 @@ import org.springframework.stereotype.Component;
  * power_threshold: an observation inside the band with power above threshold_dbm, persisting for at least
  * min_duration_s (event time) before anything is published.
  *
- * <p>State is one window per (rule, sensor, frequency bucket):
+ * <p>State is one window per signal, i.e. (rule, frequency bucket) - the same key alert-service dedups on. Any
+ * sensor reporting the signal feeds the window, so once a signal is alerting, a match from a sensor that only
+ * just started seeing it updates the alert immediately:
  * <ul>
  *   <li>pending: matches are buffered; a gap larger than max_gap starts a new window, so a short burst (or two
  *       bursts far apart) never adds up to min_duration_s;</li>
@@ -56,7 +58,7 @@ public class PowerThresholdEvaluator implements RuleEvaluator {
         }
 
         String bucket = bucket(obs.frequencyMhz());
-        String key = rule.ruleId() + "|" + obs.sensorId() + "|" + bucket;
+        String key = rule.ruleId() + "|" + bucket;
         Duration minDuration = Duration.ofSeconds(rule.minDurationS());
         List<RuleMatchEvent> events = new ArrayList<>(1);
 
