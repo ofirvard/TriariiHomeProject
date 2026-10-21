@@ -1,14 +1,13 @@
 package com.triarii.rf.alerts.alert;
 
-import com.triarii.rf.alerts.config.AlertProperties;
+import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.common.Severity;
-import io.micrometer.core.instrument.MeterRegistry;
-import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,52 +21,27 @@ public class AlertService {
 
     private static final Logger log = LoggerFactory.getLogger(AlertService.class);
 
-    private final AlertRepository alerts;
-    private final AlertProperties properties;
-    private final Clock clock;
-    private final MeterRegistry meters;
+    /** Extra wait on top of resolve_after_s, so data still in flight does not resolve then reopen an alert. */
+    static final Duration RESOLVE_GRACE = Duration.ofSeconds(10);
+    private static final int DETAIL_OBSERVATIONS = 100;
 
-    public AlertService(AlertRepository alerts, AlertProperties properties, Clock clock, MeterRegistry meters) {
+    private final AlertRepository alerts;
+
+    public AlertService(AlertRepository alerts) {
         this.alerts = alerts;
-        this.properties = properties;
-        this.clock = clock;
-        this.meters = meters;
     }
 
     /**
-     * Applies one rule match, idempotently: the event id is recorded in the same transaction, so a redelivered
-     * event is a no-op. The active alert for the signal is row-locked while it is updated.
+     * Adds a rule match to the active alert of its signal, or opens a new one. Acknowledged alerts keep updating.
+     * Redelivery is harmless: an observation is stored once per alert and the summary is derived from them.
      */
     @Transactional
     public void apply(RuleMatchEvent event) {
-        if (event.observations() == null || event.observations().isEmpty()) {
-            log.warn("Ignoring event {} without observations", event.eventId());
+        if (event.observations().isEmpty()) {
             return;
         }
-        if (!alerts.markProcessed(event.eventId())) {
-            meters.counter("rf.events.duplicate").increment();
-            return;
-        }
-        meters.counter("rf.events.consumed").increment();
-
-        Optional<AlertModel> active = alerts.findActiveForUpdate(event.signalKey());
-        AlertModel alert;
-        Instant eventStart = AlertAggregation.firstSeen(event.observations());
-        if (active.isPresent() && eventStart.isAfter(active.get().lastSeen().plusSeconds(event.resolveAfterS()))) {
-            // The sweeper has not run yet, but this alert is already past resolve_after_s: close it, start anew.
-            resolved(alerts.resolve(active.get().alertId(), "AUTO", clock.instant()), active.get().severity(), "AUTO");
-            active = Optional.empty();
-        }
-        if (active.isPresent()) {
-            alert = AlertAggregation.merge(active.get(), event.observations());
-            alerts.updateAggregates(alert);
-        } else {
-            alert = AlertAggregation.open(newAlertId(), event);
-            alerts.insert(alert, event.signalKey(), event.resolveAfterS());
-            meters.counter("rf.alerts.opened", "severity", alert.severity().name()).increment();
-            log.info("Opened alert {} for {} ({})", alert.alertId(), event.signalKey(), alert.severity());
-        }
-        alerts.addObservations(alert.alertId(), event.observations());
+        String alertId = alerts.findActiveIdForUpdate(event.signalKey()).orElseGet(() -> open(event));
+        alerts.addObservations(alertId, event.observations());
     }
 
     public List<AlertModel> find(AlertState state, Severity severity, String sensorId, Double minMhz, Double maxMhz,
@@ -76,60 +50,50 @@ public class AlertService {
     }
 
     public AlertDetails details(String alertId) {
-        AlertModel alert = get(alertId);
-        return new AlertDetails(alert, alerts.findLifecycle(alertId), alerts.countObservations(alertId),
-                alerts.latestObservations(alertId, properties.detailObservations()));
+        return new AlertDetails(get(alertId), alerts.latestObservations(alertId, DETAIL_OBSERVATIONS));
     }
 
-    /** Idempotent: acknowledging an acknowledged alert is a no-op; a resolved alert cannot be acknowledged. */
+    /** Acknowledging an acknowledged alert is a no-op; a resolved alert cannot be acknowledged. */
     @Transactional
     public AlertModel acknowledge(String alertId) {
-        if (!alerts.acknowledge(alertId, clock.instant())) {
-            AlertModel current = get(alertId);
-            if (current.state() == AlertState.RESOLVED) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "alert " + alertId + " is already resolved");
-            }
+        if (!alerts.acknowledge(alertId) && get(alertId).state() == AlertState.RESOLVED) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "alert " + alertId + " is already resolved");
         }
         return get(alertId);
     }
 
-    /** Idempotent: resolving a resolved alert is a no-op. A later match opens a new alert. */
+    /** Resolving a resolved alert is a no-op. A later match opens a new alert. */
     @Transactional
     public AlertModel resolve(String alertId) {
-        AlertModel current = get(alertId);
-        resolved(alerts.resolve(alertId, "MANUAL", clock.instant()), current.severity(), "MANUAL");
+        alerts.resolve(alertId);
         return get(alertId);
     }
 
     /**
      * Auto-resolve. Alert times are event time, but silence can only be detected against a clock: an alert
-     * resolves once its last match is older than resolve_after_s (+ grace for in-flight data) relative to now.
-     * Safe because ingest bounds clock skew (future timestamps rejected) and lateness (stragglers not evaluated).
+     * resolves once its last observation is older than resolve_after_s (+ grace) relative to now.
      */
-    @Transactional
     public int resolveExpired(Instant now) {
-        List<Severity> resolved = alerts.resolveExpired(now.minus(properties.resolveGrace()), now);
-        resolved.forEach(severity -> resolved(true, severity, "AUTO"));
-        if (!resolved.isEmpty()) {
-            log.info("Auto-resolved {} alerts", resolved.size());
+        int resolved = alerts.resolveExpired(now.minus(RESOLVE_GRACE));
+        if (resolved > 0) {
+            log.info("Auto-resolved {} alerts", resolved);
         }
-        return resolved.size();
+        return resolved;
     }
 
-    private void resolved(boolean changed, Severity severity, String reason) {
-        if (changed) {
-            meters.counter("rf.alerts.resolved", "reason", reason, "severity", severity.name()).increment();
-        }
+    private String open(RuleMatchEvent event) {
+        byte[] random = new byte[4];
+        ThreadLocalRandom.current().nextBytes(random);
+        String alertId = "alrt-" + HexFormat.of().formatHex(random);
+        ObservationModel earliest = event.observations().stream()
+                .min(Comparator.comparing(ObservationModel::timestamp)).orElseThrow();
+        alerts.insert(alertId, event, earliest.frequencyMhz());
+        log.info("Opened alert {} for {}", alertId, event.signalKey());
+        return alertId;
     }
 
     private AlertModel get(String alertId) {
         return alerts.findById(alertId).orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "alert " + alertId + " not found"));
-    }
-
-    private static String newAlertId() {
-        byte[] bytes = new byte[4];
-        ThreadLocalRandom.current().nextBytes(bytes);
-        return "alrt-" + HexFormat.of().formatHex(bytes);
     }
 }

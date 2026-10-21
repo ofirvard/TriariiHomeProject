@@ -15,7 +15,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.Test;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -61,7 +60,7 @@ class AlertLifecycleIntegrationTest {
         String signal = "rule-ism@2437.000";
 
         // 1. first event arrives over RabbitMQ -> a new OPEN alert
-        rabbitTemplate.convertAndSend(Messaging.EXCHANGE, Messaging.RULE_MATCH_ROUTING_KEY,
+        rabbitTemplate.convertAndSend(Messaging.RULE_MATCH_QUEUE,
                 event(signal, obs("sensor-a", -12, -45), obs("sensor-a", -11, -42), obs("sensor-a", -10, -44)));
         AlertModel opened = awaitActive(signal);
         assertThat(opened.state()).isEqualTo(AlertState.OPEN);
@@ -80,7 +79,7 @@ class AlertLifecycleIntegrationTest {
         assertThat(merged.sensorIds()).containsExactly("sensor-a", "sensor-b");
         assertThat(merged.lastSeen()).isEqualTo(now.minusSeconds(9));
 
-        // 3. redelivery of the same event id is a no-op
+        // 3. redelivery of the same event is a no-op
         alerts.apply(second);
         assertThat(active(signal).occurrences()).isEqualTo(4);
 
@@ -99,8 +98,7 @@ class AlertLifecycleIntegrationTest {
         assertThat(alerts.resolveExpired(now.plus(Duration.ofSeconds(120)))).isEqualTo(1);
         JsonNode resolved = http.getForObject("/api/v1/alerts/" + opened.alertId(), JsonNode.class);
         assertThat(resolved.get("state").asText()).isEqualTo("RESOLVED");
-        assertThat(resolved.get("resolved_reason").asText()).isEqualTo("AUTO");
-        assertThat(resolved.get("observation_count").asInt()).isEqualTo(5);
+        assertThat(resolved.get("occurrences").asInt()).isEqualTo(5);
         assertThat(resolved.get("observations")).hasSize(5);
 
         // 6. a resolved alert cannot be acknowledged
@@ -143,8 +141,7 @@ class AlertLifecycleIntegrationTest {
     }
 
     private RuleMatchEvent event(String signal, ObservationModel... observations) {
-        return new RuleMatchEvent(UUID.randomUUID().toString(), "rule-ism", "power_threshold", signal, Severity.HIGH,
-                60, List.of(observations));
+        return new RuleMatchEvent("rule-ism", signal, Severity.HIGH, 60, List.of(observations));
     }
 
     private ObservationModel obs(String sensorId, int secondsFromNow, double powerDbm) {

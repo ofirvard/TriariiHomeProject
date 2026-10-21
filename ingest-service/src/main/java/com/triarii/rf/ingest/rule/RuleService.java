@@ -1,8 +1,7 @@
 package com.triarii.rf.ingest.rule;
 
-import com.triarii.rf.ingest.web.ValidationFailedException;
+import com.triarii.rf.ingest.engine.RuleEngine;
 import java.util.List;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
@@ -12,41 +11,33 @@ public class RuleService {
 
     private final RuleRepository repository;
     private final RuleValidator validator;
-    private final ApplicationEventPublisher events;
+    private final RuleEngine engine;
 
-    public RuleService(RuleRepository repository, RuleValidator validator, ApplicationEventPublisher events) {
+    public RuleService(RuleRepository repository, RuleValidator validator, RuleEngine engine) {
         this.repository = repository;
         this.validator = validator;
-        this.events = events;
+        this.engine = engine;
     }
 
     public List<RuleModel> list() {
         return repository.findAll();
     }
 
-    public RuleModel get(String ruleId) {
-        return repository.findById(ruleId).orElseThrow(() -> notFound(ruleId));
-    }
-
     public RuleModel create(RuleModel body) {
-        RuleModel rule = validated(body.withDefaults());
+        RuleModel rule = validated(body.normalized(body.ruleId()));
         if (!repository.insert(rule)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "rule '" + rule.ruleId() + "' already exists");
         }
-        events.publishEvent(new RuleChangedEvent(rule.ruleId()));
         return rule;
     }
 
-    /** Full replace; also how a rule is enabled or disabled. The id in the path wins. */
+    /** Full replace; also how a rule is enabled or disabled. */
     public RuleModel update(String ruleId, RuleModel body) {
-        if (body.ruleId() != null && !body.ruleId().equals(ruleId)) {
-            throw new ValidationFailedException(List.of("rule_id: does not match the id in the path"));
-        }
-        RuleModel rule = validated(body.withRuleId(ruleId).withDefaults());
+        RuleModel rule = validated(body.normalized(ruleId));
         if (!repository.update(rule)) {
             throw notFound(ruleId);
         }
-        events.publishEvent(new RuleChangedEvent(ruleId));
+        engine.forget(ruleId); // windows built under the old settings no longer apply
         return rule;
     }
 
@@ -54,13 +45,13 @@ public class RuleService {
         if (!repository.delete(ruleId)) {
             throw notFound(ruleId);
         }
-        events.publishEvent(new RuleChangedEvent(ruleId));
+        engine.forget(ruleId);
     }
 
     private RuleModel validated(RuleModel rule) {
         List<String> errors = validator.validate(rule);
         if (!errors.isEmpty()) {
-            throw new ValidationFailedException(errors);
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, String.join("; ", errors));
         }
         return rule;
     }

@@ -2,6 +2,7 @@ package com.triarii.rf.ingest.observation;
 
 import com.triarii.rf.common.LocationModel;
 import com.triarii.rf.common.ObservationModel;
+import com.triarii.rf.ingest.sensor.SensorModel;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -84,6 +85,13 @@ public class ObservationRepository {
         }
         sql.append(" ORDER BY ts DESC, id DESC LIMIT :limit");
         return jdbc.query(sql.toString(), params, ObservationRepository::map);
+    }
+
+    /** Known sensors and their last-seen time (event time), derived from the observations. */
+    public List<SensorModel> findSensors() {
+        return jdbc.query("SELECT sensor_id, max(ts) AS last_seen FROM observations GROUP BY sensor_id ORDER BY sensor_id",
+                (rs, row) -> new SensorModel(rs.getString("sensor_id"),
+                        rs.getObject("last_seen", OffsetDateTime.class).toInstant()));
     }
 
     private static ObservationModel map(ResultSet rs, int row) throws SQLException {

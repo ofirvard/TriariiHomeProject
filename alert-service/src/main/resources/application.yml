@@ -23,7 +23,7 @@ spring:
     password: ${RABBITMQ_PASSWORD}
     listener:
       simple:
-        # retry a failing message a few times, then reject it to the dead-letter queue (never requeue forever)
+        # retry a failing message a few times, then log and drop it (never requeue forever)
         default-requeue-rejected: false
         retry:
           enabled: true
@@ -33,6 +33,9 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
+  mvc:
+    problemdetails:
+      enabled: true   # RFC 9457 error bodies
 
 server:
   port: ${SERVER_PORT:8082}

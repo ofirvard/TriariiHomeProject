@@ -24,6 +24,9 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
+  mvc:
+    problemdetails:
+      enabled: true   # RFC 9457 error bodies
 
 server:
   port: ${SERVER_PORT:8081}
@@ -43,3 +46,5 @@ management:
 
 rf:
   rules-file: ${RULES_FILE:classpath:rules.yaml}
+  max-batch-size: ${MAX_BATCH_SIZE:1000}
+  max-gap: ${MAX_GAP:5s}   # a pending window resets if no match arrives within this gap

@@ -1,32 +1,18 @@
+-- An alert row holds identity and state; everything else is derived from its observations (alert_view).
 CREATE TABLE alerts (
     alert_id         TEXT PRIMARY KEY,
     rule_id          TEXT             NOT NULL,
-    signal_key       TEXT             NOT NULL,
+    signal_key       TEXT             NOT NULL,  -- dedup key: rule + frequency bucket
     state            TEXT             NOT NULL CHECK (state IN ('OPEN', 'ACKNOWLEDGED', 'RESOLVED')),
     severity         TEXT             NOT NULL,
     frequency_mhz    DOUBLE PRECISION NOT NULL,
-    sensor_ids       TEXT[]           NOT NULL,
-    first_seen       TIMESTAMPTZ      NOT NULL,  -- event time
-    last_seen        TIMESTAMPTZ      NOT NULL,  -- event time
-    occurrences      INTEGER          NOT NULL,
-    peak_power_dbm   DOUBLE PRECISION NOT NULL,
-    resolve_after_s  INTEGER          NOT NULL,
-    acknowledged_at  TIMESTAMPTZ,
-    resolved_at      TIMESTAMPTZ,
-    resolved_reason  TEXT CHECK (resolved_reason IN ('AUTO', 'MANUAL')),
-    created_at       TIMESTAMPTZ      NOT NULL DEFAULT now(),
-    updated_at       TIMESTAMPTZ      NOT NULL DEFAULT now()
+    resolve_after_s  INTEGER          NOT NULL
 );
 
--- Dedup guarantee enforced by the database: at most one OPEN/ACKNOWLEDGED alert per rule + signal.
+-- Dedup guarantee enforced by the database: at most one OPEN/ACKNOWLEDGED alert per signal.
 CREATE UNIQUE INDEX uq_alerts_active_signal ON alerts (signal_key) WHERE state <> 'RESOLVED';
-CREATE INDEX idx_alerts_state ON alerts (state);
-CREATE INDEX idx_alerts_severity ON alerts (severity);
-CREATE INDEX idx_alerts_frequency ON alerts (frequency_mhz);
-CREATE INDEX idx_alerts_last_seen ON alerts (last_seen);
-CREATE INDEX idx_alerts_sensor_ids ON alerts USING GIN (sensor_ids);
 
--- Copies of the contributing observations, so alert details never need to call ingest-service.
+-- Contributing observations. The primary key makes a redelivered event a no-op.
 CREATE TABLE alert_observations (
     alert_id        TEXT             NOT NULL REFERENCES alerts (alert_id) ON DELETE CASCADE,
     observation_id  BIGINT           NOT NULL,
@@ -42,8 +28,14 @@ CREATE TABLE alert_observations (
 
 CREATE INDEX idx_alert_observations_ts ON alert_observations (alert_id, ts);
 
--- Idempotency for at-least-once delivery: an event id is applied at most once.
-CREATE TABLE processed_events (
-    event_id      TEXT PRIMARY KEY,
-    processed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+-- The alert as the API returns it. first_seen / last_seen are event time.
+CREATE VIEW alert_view AS
+SELECT a.alert_id, a.rule_id, a.state, a.severity, a.frequency_mhz,
+       array_agg(DISTINCT o.sensor_id ORDER BY o.sensor_id) AS sensor_ids,
+       min(o.ts)          AS first_seen,
+       max(o.ts)          AS last_seen,
+       count(*)::int      AS occurrences,
+       max(o.power_dbm)   AS peak_power_dbm
+FROM alerts a
+JOIN alert_observations o ON o.alert_id = a.alert_id
+GROUP BY a.alert_id;

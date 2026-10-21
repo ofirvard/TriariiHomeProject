@@ -6,7 +6,6 @@ import com.triarii.rf.common.LocationModel;
 import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.common.Severity;
-import com.triarii.rf.ingest.config.IngestProperties;
 import com.triarii.rf.ingest.rule.RuleModel;
 import java.time.Duration;
 import java.time.Instant;
@@ -15,17 +14,16 @@ import java.util.List;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
-class PowerThresholdEvaluatorTest {
+class RuleEngineTest {
 
     private static final Instant T0 = Instant.parse("2026-10-06T10:00:00Z");
 
     // band 2400-2483.5 MHz, > -50 dBm for >= 10 s; max_gap 5 s
     private static final RuleModel RULE = new RuleModel("rule-ism", "ISM high power", RuleModel.POWER_THRESHOLD,
-            new RuleModel.Band(2400.0, 2483.5), Severity.HIGH, 60, true, -50.0, 10, null, null, null);
+            new RuleModel.Band(2400.0, 2483.5), -50.0, 10, 60, Severity.HIGH, true);
 
-    private final PowerThresholdEvaluator evaluator = new PowerThresholdEvaluator(new IngestProperties(
-            "classpath:rules.yaml", 1000, Duration.ofSeconds(60), Duration.ofSeconds(120), Duration.ofSeconds(5),
-            0.1, 500));
+    // evaluate() uses neither the repository nor RabbitMQ
+    private final RuleEngine engine = new RuleEngine(null, null, Duration.ofSeconds(5));
 
     private long nextId = 1;
 
@@ -102,26 +100,16 @@ class PowerThresholdEvaluatorTest {
     }
 
     @Test
-    void forgettingARuleDropsItsPendingWindows() {
+    void forgettingARuleDropsItsWindows() {
         feed("sensor-03", IntStream.rangeClosed(0, 9), 2437.0, -40);
-        evaluator.forget("rule-ism");
+        engine.forget("rule-ism");
 
         assertThat(feed("sensor-03", IntStream.of(10), 2437.0, -40)).isEmpty();
     }
 
-    @Test
-    void evictionDropsIdleWindows() {
-        feed("sensor-03", IntStream.rangeClosed(0, 3), 2437.0, -40);
-        assertThat(evaluator.windowCount()).isEqualTo(1);
-
-        evaluator.evictBefore(T0.plusSeconds(60));
-
-        assertThat(evaluator.windowCount()).isZero();
-    }
-
     private List<RuleMatchEvent> feed(String sensorId, IntStream seconds, double frequencyMhz, double powerDbm) {
         List<RuleMatchEvent> events = new ArrayList<>();
-        seconds.forEach(s -> events.addAll(evaluator.evaluate(RULE, new ObservationModel(nextId++, sensorId,
+        seconds.forEach(s -> events.addAll(engine.evaluate(RULE, new ObservationModel(nextId++, sensorId,
                 T0.plusSeconds(s), frequencyMhz, 20000.0, powerDbm, new LocationModel(32.08, 34.78)))));
         return events;
     }

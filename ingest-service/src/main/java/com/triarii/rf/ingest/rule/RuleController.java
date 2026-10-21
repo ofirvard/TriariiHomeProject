@@ -27,11 +27,6 @@ public class RuleController {
         return service.list();
     }
 
-    @GetMapping("/{ruleId}")
-    public RuleModel get(@PathVariable String ruleId) {
-        return service.get(ruleId);
-    }
-
     @PostMapping
     public ResponseEntity<RuleModel> create(@RequestBody RuleModel rule) {
         RuleModel created = service.create(rule);

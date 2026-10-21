@@ -1,101 +1,138 @@
 package com.triarii.rf.ingest.engine;
 
+import com.triarii.rf.common.Messaging;
 import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.RuleMatchEvent;
-import com.triarii.rf.ingest.config.IngestProperties;
-import com.triarii.rf.ingest.messaging.EventPublisher;
 import com.triarii.rf.ingest.rule.RuleModel;
-import com.triarii.rf.ingest.rule.RuleCache;
-import com.triarii.rf.ingest.rule.RuleChangedEvent;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
+import com.triarii.rf.ingest.rule.RuleRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Function;
-import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.event.EventListener;
-import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.amqp.AmqpException;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * Runs stored observations through every enabled rule, in event-time order.
+ * Evaluates power_threshold rules: an observation inside the band with power above threshold_dbm, persisting
+ * for at least min_duration_s (event time) before anything is published.
  *
- * <p>Late data: the watermark is the newest event time seen. Observations older than
- * (watermark - allowed_lateness) are stored but not evaluated, so a straggler cannot reopen an alert that has
- * already auto-resolved. Within the lateness window, out-of-order observations are evaluated normally.
+ * <p>State is one window per signal = (rule, 0.1 MHz frequency bucket), the same key alert-service dedups on:
+ * <ul>
+ *   <li>pending: matches are buffered; a gap larger than max_gap starts a new window, so a short burst (or two
+ *       bursts far apart) never adds up to min_duration_s;</li>
+ *   <li>firing: once last - first >= min_duration_s the buffer is published as one event, then every further
+ *       match is published on its own. A firing window only ends after resolve_after_s without a match, i.e.
+ *       when alert-service auto-resolves the alert.</li>
+ * </ul>
+ * Out-of-order observations: windows track min(first) / max(last), and each batch is evaluated in timestamp
+ * order. An observation older than its window by more than the gap is ignored (it is still stored).
  */
 @Component
 public class RuleEngine {
 
     private static final Logger log = LoggerFactory.getLogger(RuleEngine.class);
+    private static final double BUCKET_MHZ = 0.1;
 
-    private final RuleCache rules;
-    private final Map<String, RuleEvaluator> evaluators;
-    private final EventPublisher publisher;
-    private final Duration allowedLateness;
-    private final AtomicReference<Instant> watermark = new AtomicReference<>(Instant.EPOCH);
-    private final Counter lateCounter;
-    private final MeterRegistry meters;
+    private final RuleRepository rules;
+    private final RabbitTemplate rabbit;
+    private final Duration maxGap;
+    private final Map<String, Window> windows = new ConcurrentHashMap<>();
 
-    public RuleEngine(RuleCache rules, List<RuleEvaluator> evaluators, EventPublisher publisher,
-            IngestProperties properties, MeterRegistry meters) {
+    public RuleEngine(RuleRepository rules, RabbitTemplate rabbit, @Value("${rf.max-gap}") Duration maxGap) {
         this.rules = rules;
-        this.evaluators = evaluators.stream().collect(Collectors.toMap(RuleEvaluator::type, Function.identity()));
-        this.publisher = publisher;
-        this.allowedLateness = properties.allowedLateness();
-        this.meters = meters;
-        this.lateCounter = meters.counter("rf.observations.late");
+        this.rabbit = rabbit;
+        this.maxGap = maxGap;
     }
 
-    /** Never throws: the observations are already committed, a failure here must not fail the request. */
+    /** Runs stored observations through every enabled rule, in event-time order, and publishes the matches. */
     public void process(List<ObservationModel> observations) {
-        try {
-            List<RuleMatchEvent> events = new ArrayList<>();
-            List<RuleModel> enabled = rules.enabled();
-            observations.stream()
-                    .sorted(Comparator.comparing(ObservationModel::timestamp))
-                    .forEach(obs -> {
-                        Instant wm = watermark.accumulateAndGet(obs.timestamp(),
-                                (a, b) -> a.isAfter(b) ? a : b);
-                        if (obs.timestamp().isBefore(wm.minus(allowedLateness))) {
-                            lateCounter.increment();
-                            return;
-                        }
-                        for (RuleModel rule : enabled) {
-                            RuleEvaluator evaluator = evaluators.get(rule.type());
-                            if (evaluator != null) {
-                                events.addAll(evaluator.evaluate(rule, obs));
-                            }
-                        }
-                    });
-            for (RuleMatchEvent event : events) {
-                meters.counter("rf.rule.matches", "rule_id", event.ruleId()).increment();
-                publisher.publish(event);
+        List<RuleModel> enabled = rules.findEnabled();
+        observations.stream()
+                .sorted(Comparator.comparing(ObservationModel::timestamp))
+                .forEach(obs -> enabled.forEach(rule -> evaluate(rule, obs).forEach(this::publish)));
+    }
+
+    /** Drops all windows of a rule (it was changed or deleted). */
+    public void forget(String ruleId) {
+        windows.keySet().removeIf(key -> key.startsWith(ruleId + "@"));
+    }
+
+    /** @return events to publish for this observation (usually none) */
+    List<RuleMatchEvent> evaluate(RuleModel rule, ObservationModel obs) {
+        if (!rule.band().contains(obs.frequencyMhz()) || obs.powerDbm() <= rule.thresholdDbm()) {
+            return List.of();
+        }
+        String signalKey = rule.ruleId() + "@"
+                + String.format(Locale.ROOT, "%.3f", Math.round(obs.frequencyMhz() / BUCKET_MHZ) * BUCKET_MHZ);
+        Duration minDuration = Duration.ofSeconds(rule.minDurationS());
+        Duration resolveAfter = Duration.ofSeconds(rule.resolveAfterS());
+        List<RuleMatchEvent> events = new ArrayList<>(1);
+
+        windows.compute(signalKey, (key, window) -> {
+            Duration gap = window != null && window.firing ? resolveAfter : maxGap;
+            if (window == null || obs.timestamp().isAfter(window.last.plus(gap))) {
+                window = new Window(obs.timestamp());
+            } else if (obs.timestamp().isBefore(window.first.minus(gap))) {
+                return window; // far older than the current window: not part of it
             }
-        } catch (RuntimeException e) {
-            log.error("Rule evaluation failed for {} observations", observations.size(), e);
+            window.add(obs);
+            if (window.firing) {
+                events.add(event(rule, signalKey, List.of(obs)));
+            } else if (Duration.between(window.first, window.last).compareTo(minDuration) >= 0) {
+                window.firing = true;
+                window.pending.sort(Comparator.comparing(ObservationModel::timestamp));
+                events.add(event(rule, signalKey, window.pending));
+                window.pending = List.of();
+            }
+            return window;
+        });
+        return events;
+    }
+
+    private void publish(RuleMatchEvent event) {
+        try {
+            rabbit.convertAndSend(Messaging.RULE_MATCH_QUEUE, event);
+        } catch (AmqpException e) {
+            // The observations are already stored; losing this event is documented (no outbox).
+            log.error("Failed to publish match for {}", event.signalKey(), e);
         }
     }
 
-    public Instant watermark() {
-        return watermark.get();
+    private static RuleMatchEvent event(RuleModel rule, String signalKey, List<ObservationModel> observations) {
+        return new RuleMatchEvent(rule.ruleId(), signalKey, rule.severity(), rule.resolveAfterS(), observations);
     }
 
-    @EventListener
-    void onRuleChanged(RuleChangedEvent event) {
-        evaluators.values().forEach(evaluator -> evaluator.forget(event.ruleId()));
-    }
+    /** Mutated only inside ConcurrentHashMap.compute, which serializes access per signal. */
+    private static final class Window {
 
-    @Scheduled(fixedDelay = 30_000)
-    void evictStaleState() {
-        Instant horizon = watermark.get().minus(allowedLateness);
-        evaluators.values().forEach(evaluator -> evaluator.evictBefore(horizon));
+        Instant first;
+        Instant last;
+        boolean firing;
+        List<ObservationModel> pending = new ArrayList<>();
+
+        Window(Instant start) {
+            first = start;
+            last = start;
+        }
+
+        void add(ObservationModel obs) {
+            if (obs.timestamp().isBefore(first)) {
+                first = obs.timestamp();
+            }
+            if (obs.timestamp().isAfter(last)) {
+                last = obs.timestamp();
+            }
+            if (!firing) {
+                pending.add(obs);
+            }
+        }
     }
 }
