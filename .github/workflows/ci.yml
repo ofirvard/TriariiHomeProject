@@ -1,0 +1,36 @@
+# Stage: lint and test. A failing check blocks the merge (required on main).
+name: CI
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-test:
+    name: Lint and test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # Checkstyle + unit tests + integration tests (Testcontainers: real Postgres and RabbitMQ)
+      - name: Lint and test
+        run: ./gradlew check
+
+      - name: Lint shell scripts
+        run: shellcheck simulator.sh deploy/smoke-test.sh
+
+      - name: Keep test and lint reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: "*/build/reports/"

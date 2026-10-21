@@ -1,0 +1,35 @@
+# The pipeline: the only workflow with triggers. Each stage is its own reusable workflow; this file decides
+# which stages run. Pull requests run CI only; a merge to main runs CI -> publish -> verify.
+name: Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/publish.yml
+    with:
+      image_tag: ${{ github.sha }}
+
+  verify:
+    needs: publish
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/verify.yml
+    with:
+      image_tag: ${{ github.sha }}
