@@ -2,12 +2,12 @@ package com.triarii.rf.ingest.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.triarii.rf.common.Location;
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.LocationModel;
+import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.common.Severity;
 import com.triarii.rf.ingest.config.IngestProperties;
-import com.triarii.rf.ingest.rule.Rule;
+import com.triarii.rf.ingest.rule.RuleModel;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -20,8 +20,8 @@ class PowerThresholdEvaluatorTest {
     private static final Instant T0 = Instant.parse("2026-10-06T10:00:00Z");
 
     // band 2400-2483.5 MHz, > -50 dBm for >= 10 s; max_gap 5 s
-    private static final Rule RULE = new Rule("rule-ism", "ISM high power", Rule.POWER_THRESHOLD,
-            new Rule.Band(2400.0, 2483.5), Severity.HIGH, 60, true, -50.0, 10, null, null, null);
+    private static final RuleModel RULE = new RuleModel("rule-ism", "ISM high power", RuleModel.POWER_THRESHOLD,
+            new RuleModel.Band(2400.0, 2483.5), Severity.HIGH, 60, true, -50.0, 10, null, null, null);
 
     private final PowerThresholdEvaluator evaluator = new PowerThresholdEvaluator(new IngestProperties(
             "classpath:rules.yaml", 1000, Duration.ofSeconds(60), Duration.ofSeconds(120), Duration.ofSeconds(5),
@@ -55,7 +55,7 @@ class PowerThresholdEvaluatorTest {
         List<RuleMatchEvent> events = feed("sensor-03", IntStream.of(1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 10), 2437.0, -40);
 
         assertThat(events).hasSize(1);
-        List<Instant> timestamps = events.get(0).observations().stream().map(Observation::timestamp).toList();
+        List<Instant> timestamps = events.get(0).observations().stream().map(ObservationModel::timestamp).toList();
         assertThat(timestamps).hasSize(11).isSorted();
     }
 
@@ -97,7 +97,7 @@ class PowerThresholdEvaluatorTest {
                 feed(s % 2 == 0 ? "sensor-a" : "sensor-b", IntStream.of(s), 2437.0, -40)));
 
         assertThat(events).hasSize(1);
-        assertThat(events.get(0).observations()).extracting(Observation::sensorId)
+        assertThat(events.get(0).observations()).extracting(ObservationModel::sensorId)
                 .containsOnly("sensor-a", "sensor-b");
     }
 
@@ -121,8 +121,8 @@ class PowerThresholdEvaluatorTest {
 
     private List<RuleMatchEvent> feed(String sensorId, IntStream seconds, double frequencyMhz, double powerDbm) {
         List<RuleMatchEvent> events = new ArrayList<>();
-        seconds.forEach(s -> events.addAll(evaluator.evaluate(RULE, new Observation(nextId++, sensorId,
-                T0.plusSeconds(s), frequencyMhz, 20000.0, powerDbm, new Location(32.08, 34.78)))));
+        seconds.forEach(s -> events.addAll(evaluator.evaluate(RULE, new ObservationModel(nextId++, sensorId,
+                T0.plusSeconds(s), frequencyMhz, 20000.0, powerDbm, new LocationModel(32.08, 34.78)))));
         return events;
     }
 }

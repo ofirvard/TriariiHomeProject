@@ -9,18 +9,18 @@ import org.springframework.stereotype.Component;
 public class RuleCache {
 
     private final RuleRepository rules;
-    private volatile List<Rule> enabled = List.of();
+    private volatile List<RuleModel> enabled = List.of();
 
     public RuleCache(RuleRepository rules) {
         this.rules = rules;
     }
 
-    public List<Rule> enabled() {
+    public List<RuleModel> enabled() {
         return enabled;
     }
 
     public void reload() {
-        enabled = rules.findAll().stream().filter(Rule::enabled).toList();
+        enabled = rules.findAll().stream().filter(RuleModel::enabled).toList();
     }
 
     @EventListener

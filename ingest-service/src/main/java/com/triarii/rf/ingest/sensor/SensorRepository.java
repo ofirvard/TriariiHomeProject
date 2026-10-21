@@ -1,7 +1,7 @@
 package com.triarii.rf.ingest.sensor;
 
-import com.triarii.rf.common.Location;
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.LocationModel;
+import com.triarii.rf.common.ObservationModel;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Collection;
@@ -35,13 +35,13 @@ public class SensorRepository {
     }
 
     /** One upsert per sensor, using that sensor's newest observation in the batch. */
-    public void upsertLastSeen(List<Observation> observations) {
-        BinaryOperator<Observation> newest = BinaryOperator.maxBy(Comparator.comparing(Observation::timestamp));
-        Collection<Observation> latest = observations.stream()
-                .collect(Collectors.toMap(Observation::sensorId, o -> o, newest))
+    public void upsertLastSeen(List<ObservationModel> observations) {
+        BinaryOperator<ObservationModel> newest = BinaryOperator.maxBy(Comparator.comparing(ObservationModel::timestamp));
+        Collection<ObservationModel> latest = observations.stream()
+                .collect(Collectors.toMap(ObservationModel::sensorId, o -> o, newest))
                 .values();
         SqlParameterSource[] params = latest.stream()
-                .sorted(Comparator.comparing(Observation::sensorId)) // stable lock order across requests
+                .sorted(Comparator.comparing(ObservationModel::sensorId)) // stable lock order across requests
                 .map(o -> new MapSqlParameterSource()
                         .addValue("sensorId", o.sensorId())
                         .addValue("lastSeen", o.timestamp().atOffset(ZoneOffset.UTC))
@@ -51,11 +51,11 @@ public class SensorRepository {
         jdbc.batchUpdate(UPSERT, params);
     }
 
-    public List<SensorView> findAll() {
+    public List<SensorModel> findAll() {
         return jdbc.query("SELECT sensor_id, last_seen, lat, lon FROM sensors ORDER BY sensor_id",
-                (rs, row) -> new SensorView(
+                (rs, row) -> new SensorModel(
                         rs.getString("sensor_id"),
                         rs.getObject("last_seen", OffsetDateTime.class).toInstant(),
-                        new Location(rs.getDouble("lat"), rs.getDouble("lon"))));
+                        new LocationModel(rs.getDouble("lat"), rs.getDouble("lon"))));
     }
 }

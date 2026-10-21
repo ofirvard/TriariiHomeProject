@@ -16,7 +16,7 @@ public class SensorController {
     }
 
     @GetMapping
-    public List<SensorView> list() {
+    public List<SensorModel> list() {
         return sensors.findAll();
     }
 }

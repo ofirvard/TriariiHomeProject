@@ -6,7 +6,7 @@ import com.triarii.rf.common.Severity;
  * A detection rule, in the same JSON shape as the API and the rules file. Type-specific fields are null when
  * they do not apply; {@link RuleValidator} enforces which ones are required per type.
  */
-public record Rule(
+public record RuleModel(
         String ruleId,
         String name,
         String type,
@@ -32,14 +32,14 @@ public record Rule(
         }
     }
 
-    Rule withRuleId(String id) {
-        return new Rule(id, name, type, band, severity, resolveAfterS, enabled, thresholdDbm, minDurationS,
+    RuleModel withRuleId(String id) {
+        return new RuleModel(id, name, type, band, severity, resolveAfterS, enabled, thresholdDbm, minDurationS,
                 toleranceKhz, minSensors, windowS);
     }
 
     /** Rules are enabled unless explicitly disabled. */
-    Rule withDefaults() {
-        return new Rule(ruleId, name, type, band, severity, resolveAfterS, enabled == null || enabled,
+    RuleModel withDefaults() {
+        return new RuleModel(ruleId, name, type, band, severity, resolveAfterS, enabled == null || enabled,
                 thresholdDbm, minDurationS, toleranceKhz, minSensors, windowS);
     }
 }

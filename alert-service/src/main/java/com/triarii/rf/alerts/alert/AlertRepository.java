@@ -2,8 +2,8 @@ package com.triarii.rf.alerts.alert;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.triarii.rf.common.Location;
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.LocationModel;
+import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.Severity;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -44,31 +44,31 @@ public class AlertRepository {
     }
 
     /** The OPEN/ACKNOWLEDGED alert for a signal, row-locked until the transaction ends. */
-    public Optional<Alert> findActiveForUpdate(String signalKey) {
+    public Optional<AlertModel> findActiveForUpdate(String signalKey) {
         return jdbc.query("SELECT " + COLUMNS + " FROM alerts WHERE signal_key = :signalKey"
                         + " AND state <> 'RESOLVED' FOR UPDATE",
                 new MapSqlParameterSource("signalKey", signalKey), this::map).stream().findFirst();
     }
 
-    public Optional<Alert> findById(String alertId) {
+    public Optional<AlertModel> findById(String alertId) {
         return jdbc.query("SELECT " + COLUMNS + " FROM alerts WHERE alert_id = :alertId",
                 new MapSqlParameterSource("alertId", alertId), this::map).stream().findFirst();
     }
 
-    public void insert(Alert alert) {
+    public void insert(AlertModel alert) {
         jdbc.update("INSERT INTO alerts (alert_id, rule_id, signal_key, state, severity, frequency_mhz, sensor_ids,"
                 + " first_seen, last_seen, occurrences, peak_power_dbm, resolve_after_s)"
                 + " VALUES (:alertId, :ruleId, :signalKey, :state, :severity, :frequencyMhz, " + SENSOR_ARRAY + ","
                 + " :firstSeen, :lastSeen, :occurrences, :peakPowerDbm, :resolveAfterS)", params(alert));
     }
 
-    public void updateAggregates(Alert alert) {
+    public void updateAggregates(AlertModel alert) {
         jdbc.update("UPDATE alerts SET sensor_ids = " + SENSOR_ARRAY + ", first_seen = :firstSeen,"
                 + " last_seen = :lastSeen, occurrences = :occurrences, peak_power_dbm = :peakPowerDbm,"
                 + " updated_at = now() WHERE alert_id = :alertId", params(alert));
     }
 
-    public void addObservations(String alertId, List<Observation> observations) {
+    public void addObservations(String alertId, List<ObservationModel> observations) {
         SqlParameterSource[] params = observations.stream()
                 .map(o -> new MapSqlParameterSource()
                         .addValue("alertId", alertId)
@@ -89,14 +89,14 @@ public class AlertRepository {
                 """, params);
     }
 
-    public List<Observation> latestObservations(String alertId, int limit) {
+    public List<ObservationModel> latestObservations(String alertId, int limit) {
         return jdbc.query("""
                 SELECT observation_id, sensor_id, ts, frequency_mhz, bandwidth_khz, power_dbm, lat, lon
                 FROM alert_observations WHERE alert_id = :alertId ORDER BY ts DESC LIMIT :limit
                 """, new MapSqlParameterSource("alertId", alertId).addValue("limit", limit),
-                (rs, row) -> new Observation(rs.getLong("observation_id"), rs.getString("sensor_id"),
+                (rs, row) -> new ObservationModel(rs.getLong("observation_id"), rs.getString("sensor_id"),
                         instant(rs, "ts"), rs.getDouble("frequency_mhz"), rs.getDouble("bandwidth_khz"),
-                        rs.getDouble("power_dbm"), new Location(rs.getDouble("lat"), rs.getDouble("lon"))));
+                        rs.getDouble("power_dbm"), new LocationModel(rs.getDouble("lat"), rs.getDouble("lon"))));
     }
 
     public int countObservations(String alertId) {
@@ -135,7 +135,7 @@ public class AlertRepository {
     }
 
     /** All filters are optional (null = not applied). Most recently active first. */
-    public List<Alert> find(AlertState state, Severity severity, String sensorId, Double minMhz, Double maxMhz,
+    public List<AlertModel> find(AlertState state, Severity severity, String sensorId, Double minMhz, Double maxMhz,
             int limit) {
         StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM alerts WHERE TRUE");
         MapSqlParameterSource params = new MapSqlParameterSource("limit", limit);
@@ -163,7 +163,7 @@ public class AlertRepository {
         return jdbc.query(sql.toString(), params, this::map);
     }
 
-    private MapSqlParameterSource params(Alert alert) {
+    private MapSqlParameterSource params(AlertModel alert) {
         try {
             return new MapSqlParameterSource()
                     .addValue("alertId", alert.alertId())
@@ -183,8 +183,8 @@ public class AlertRepository {
         }
     }
 
-    private Alert map(ResultSet rs, int row) throws SQLException {
-        return new Alert(
+    private AlertModel map(ResultSet rs, int row) throws SQLException {
+        return new AlertModel(
                 rs.getString("alert_id"),
                 rs.getString("rule_id"),
                 rs.getString("signal_key"),

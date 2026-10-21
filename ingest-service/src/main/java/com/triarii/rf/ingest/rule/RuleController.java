@@ -23,23 +23,23 @@ public class RuleController {
     }
 
     @GetMapping
-    public List<Rule> list() {
+    public List<RuleModel> list() {
         return service.list();
     }
 
     @GetMapping("/{ruleId}")
-    public Rule get(@PathVariable String ruleId) {
+    public RuleModel get(@PathVariable String ruleId) {
         return service.get(ruleId);
     }
 
     @PostMapping
-    public ResponseEntity<Rule> create(@RequestBody Rule rule) {
-        Rule created = service.create(rule);
+    public ResponseEntity<RuleModel> create(@RequestBody RuleModel rule) {
+        RuleModel created = service.create(rule);
         return ResponseEntity.created(URI.create("/api/v1/rules/" + created.ruleId())).body(created);
     }
 
     @PutMapping("/{ruleId}")
-    public Rule update(@PathVariable String ruleId, @RequestBody Rule rule) {
+    public RuleModel update(@PathVariable String ruleId, @RequestBody RuleModel rule) {
         return service.update(ruleId, rule);
     }
 

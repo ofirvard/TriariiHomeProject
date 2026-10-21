@@ -22,7 +22,7 @@ public class RuleSeeder {
 
     private static final Logger log = LoggerFactory.getLogger(RuleSeeder.class);
 
-    record RulesFile(List<Rule> rules) {
+    record RulesFile(List<RuleModel> rules) {
     }
 
     private final RuleRepository repository;
@@ -56,9 +56,9 @@ public class RuleSeeder {
         }
 
         int inserted = 0;
-        List<Rule> rules = file.rules() == null ? List.of() : file.rules();
-        for (Rule rule : rules) {
-            Rule normalized = rule.withDefaults();
+        List<RuleModel> rules = file.rules() == null ? List.of() : file.rules();
+        for (RuleModel rule : rules) {
+            RuleModel normalized = rule.withDefaults();
             List<String> errors = validator.validate(normalized);
             if (!errors.isEmpty()) {
                 throw new IllegalStateException("Invalid rule '" + rule.ruleId() + "' in " + properties.rulesFile()

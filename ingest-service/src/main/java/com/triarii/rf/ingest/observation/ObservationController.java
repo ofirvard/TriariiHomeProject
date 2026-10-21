@@ -1,7 +1,7 @@
 package com.triarii.rf.ingest.observation;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.ObservationModel;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -38,7 +38,7 @@ public class ObservationController {
     }
 
     @GetMapping
-    public List<Observation> query(
+    public List<ObservationModel> query(
             @RequestParam(name = "sensor_id", required = false) String sensorId,
             @RequestParam(name = "min_mhz", required = false) Double minMhz,
             @RequestParam(name = "max_mhz", required = false) Double maxMhz,

@@ -50,9 +50,9 @@ public class AlertService {
         }
         meters.counter("rf.events.consumed").increment();
 
-        Optional<Alert> active = alerts.findActiveForUpdate(event.signalKey());
-        Alert alert;
-        if (active.isPresent() && active.get().expiredBefore(Alert.firstSeen(event.observations()))) {
+        Optional<AlertModel> active = alerts.findActiveForUpdate(event.signalKey());
+        AlertModel alert;
+        if (active.isPresent() && active.get().expiredBefore(AlertModel.firstSeen(event.observations()))) {
             // The sweeper has not run yet, but this alert is already past resolve_after_s: close it, start anew.
             resolved(alerts.resolve(active.get().alertId(), "AUTO", clock.instant()), active.get().severity(), "AUTO");
             active = Optional.empty();
@@ -61,7 +61,7 @@ public class AlertService {
             alert = active.get().merge(event.observations());
             alerts.updateAggregates(alert);
         } else {
-            alert = Alert.open(newAlertId(), event);
+            alert = AlertModel.open(newAlertId(), event);
             alerts.insert(alert);
             meters.counter("rf.alerts.opened", "severity", alert.severity().name()).increment();
             log.info("Opened alert {} for {} ({})", alert.alertId(), alert.signalKey(), alert.severity());
@@ -69,22 +69,22 @@ public class AlertService {
         alerts.addObservations(alert.alertId(), event.observations());
     }
 
-    public List<Alert> find(AlertState state, Severity severity, String sensorId, Double minMhz, Double maxMhz,
+    public List<AlertModel> find(AlertState state, Severity severity, String sensorId, Double minMhz, Double maxMhz,
             int limit) {
         return alerts.find(state, severity, sensorId, minMhz, maxMhz, limit);
     }
 
     public AlertDetails details(String alertId) {
-        Alert alert = get(alertId);
+        AlertModel alert = get(alertId);
         return new AlertDetails(alert, alerts.countObservations(alertId),
                 alerts.latestObservations(alertId, properties.detailObservations()));
     }
 
     /** Idempotent: acknowledging an acknowledged alert is a no-op; a resolved alert cannot be acknowledged. */
     @Transactional
-    public Alert acknowledge(String alertId) {
+    public AlertModel acknowledge(String alertId) {
         if (!alerts.acknowledge(alertId, clock.instant())) {
-            Alert current = get(alertId);
+            AlertModel current = get(alertId);
             if (current.state() == AlertState.RESOLVED) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "alert " + alertId + " is already resolved");
             }
@@ -94,8 +94,8 @@ public class AlertService {
 
     /** Idempotent: resolving a resolved alert is a no-op. A later match opens a new alert. */
     @Transactional
-    public Alert resolve(String alertId) {
-        Alert current = get(alertId);
+    public AlertModel resolve(String alertId) {
+        AlertModel current = get(alertId);
         resolved(alerts.resolve(alertId, "MANUAL", clock.instant()), current.severity(), "MANUAL");
         return get(alertId);
     }
@@ -121,7 +121,7 @@ public class AlertService {
         }
     }
 
-    private Alert get(String alertId) {
+    private AlertModel get(String alertId) {
         return alerts.findById(alertId).orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "alert " + alertId + " not found"));
     }

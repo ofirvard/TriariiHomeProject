@@ -24,7 +24,7 @@ public class AlertController {
     }
 
     @GetMapping
-    public List<Alert> list(
+    public List<AlertModel> list(
             @RequestParam(name = "state", required = false) AlertState state,
             @RequestParam(name = "severity", required = false) Severity severity,
             @RequestParam(name = "sensor_id", required = false) String sensorId,
@@ -46,12 +46,12 @@ public class AlertController {
     }
 
     @PostMapping("/{alertId}/ack")
-    public Alert acknowledge(@PathVariable String alertId) {
+    public AlertModel acknowledge(@PathVariable String alertId) {
         return service.acknowledge(alertId);
     }
 
     @PostMapping("/{alertId}/resolve")
-    public Alert resolve(@PathVariable String alertId) {
+    public AlertModel resolve(@PathVariable String alertId) {
         return service.resolve(alertId);
     }
 }

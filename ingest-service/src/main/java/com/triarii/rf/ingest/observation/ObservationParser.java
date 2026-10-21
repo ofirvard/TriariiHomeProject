@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.ingest.config.IngestProperties;
 import com.triarii.rf.ingest.observation.IngestResult.ItemError;
 import jakarta.validation.ConstraintViolation;
@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
-/** Turns one JSON item into a validated {@link Observation}, or into the list of reasons it was rejected. */
+/** Turns one JSON item into a validated {@link ObservationModel}, or into the list of reasons it was rejected. */
 @Component
 public class ObservationParser {
 
@@ -40,7 +40,7 @@ public class ObservationParser {
     public sealed interface Parsed permits Valid, Invalid {
     }
 
-    public record Valid(Observation observation) implements Parsed {
+    public record Valid(ObservationModel observation) implements Parsed {
     }
 
     public record Invalid(List<ItemError> errors) implements Parsed {
@@ -61,9 +61,9 @@ public class ObservationParser {
             node.remove("timestamp");
         }
 
-        Observation observation;
+        ObservationModel observation;
         try {
-            observation = objectMapper.treeToValue(node, Observation.class);
+            observation = objectMapper.treeToValue(node, ObservationModel.class);
         } catch (JsonMappingException e) {
             return invalid(index, fieldOf(e), "has an invalid type or format");
         } catch (Exception e) {
@@ -71,7 +71,7 @@ public class ObservationParser {
         }
 
         boolean timestampReported = !errors.isEmpty();
-        for (ConstraintViolation<Observation> violation : validator.validate(observation)) {
+        for (ConstraintViolation<ObservationModel> violation : validator.validate(observation)) {
             String field = snakeCase(violation);
             if (!(timestampReported && field.equals("timestamp"))) {
                 errors.add(new ItemError(index, field, violation.getMessage()));

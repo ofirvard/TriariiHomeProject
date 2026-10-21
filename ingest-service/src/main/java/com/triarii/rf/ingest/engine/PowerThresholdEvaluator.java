@@ -1,9 +1,9 @@
 package com.triarii.rf.ingest.engine;
 
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.ingest.config.IngestProperties;
-import com.triarii.rf.ingest.rule.Rule;
+import com.triarii.rf.ingest.rule.RuleModel;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -48,11 +48,11 @@ public class PowerThresholdEvaluator implements RuleEvaluator {
 
     @Override
     public String type() {
-        return Rule.POWER_THRESHOLD;
+        return RuleModel.POWER_THRESHOLD;
     }
 
     @Override
-    public List<RuleMatchEvent> evaluate(Rule rule, Observation obs) {
+    public List<RuleMatchEvent> evaluate(RuleModel rule, ObservationModel obs) {
         if (!rule.band().contains(obs.frequencyMhz()) || obs.powerDbm() <= rule.thresholdDbm()) {
             return List.of();
         }
@@ -106,7 +106,7 @@ public class PowerThresholdEvaluator implements RuleEvaluator {
         return String.format(Locale.ROOT, "%.3f", Math.round(frequencyMhz / bucketMhz) * bucketMhz);
     }
 
-    private static RuleMatchEvent event(Rule rule, String bucket, List<Observation> observations) {
+    private static RuleMatchEvent event(RuleModel rule, String bucket, List<ObservationModel> observations) {
         return new RuleMatchEvent(UUID.randomUUID().toString(), rule.ruleId(), rule.type(),
                 rule.ruleId() + "@" + bucket, rule.severity(), rule.resolveAfterS(), observations);
     }
@@ -118,7 +118,7 @@ public class PowerThresholdEvaluator implements RuleEvaluator {
         Instant first;
         Instant last;
         boolean firing;
-        List<Observation> pending = new ArrayList<>();
+        List<ObservationModel> pending = new ArrayList<>();
 
         Window(Instant start, Duration resolveAfter) {
             this.resolveAfter = resolveAfter;
@@ -126,7 +126,7 @@ public class PowerThresholdEvaluator implements RuleEvaluator {
             this.last = start;
         }
 
-        void add(Observation obs, int maxPending) {
+        void add(ObservationModel obs, int maxPending) {
             if (obs.timestamp().isBefore(first)) {
                 first = obs.timestamp();
             }
@@ -138,9 +138,9 @@ public class PowerThresholdEvaluator implements RuleEvaluator {
             }
         }
 
-        List<Observation> drainPending() {
-            List<Observation> drained = pending;
-            drained.sort(Comparator.comparing(Observation::timestamp));
+        List<ObservationModel> drainPending() {
+            List<ObservationModel> drained = pending;
+            drained.sort(Comparator.comparing(ObservationModel::timestamp));
             pending = List.of();
             return drained;
         }

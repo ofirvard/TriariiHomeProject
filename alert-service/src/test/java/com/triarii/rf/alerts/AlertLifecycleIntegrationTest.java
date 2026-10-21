@@ -3,12 +3,12 @@ package com.triarii.rf.alerts;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.triarii.rf.alerts.alert.Alert;
+import com.triarii.rf.alerts.alert.AlertModel;
 import com.triarii.rf.alerts.alert.AlertService;
 import com.triarii.rf.alerts.alert.AlertState;
 import com.triarii.rf.common.Messaging;
-import com.triarii.rf.common.Location;
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.LocationModel;
+import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.common.Severity;
 import java.time.Duration;
@@ -63,7 +63,7 @@ class AlertLifecycleIntegrationTest {
         // 1. first event arrives over RabbitMQ -> a new OPEN alert
         rabbitTemplate.convertAndSend(Messaging.EXCHANGE, Messaging.RULE_MATCH_ROUTING_KEY,
                 event(signal, obs("sensor-a", -12, -45), obs("sensor-a", -11, -42), obs("sensor-a", -10, -44)));
-        Alert opened = awaitActive(signal);
+        AlertModel opened = awaitActive(signal);
         assertThat(opened.state()).isEqualTo(AlertState.OPEN);
         assertThat(opened.occurrences()).isEqualTo(3);
         assertThat(opened.peakPowerDbm()).isEqualTo(-42);
@@ -73,7 +73,7 @@ class AlertLifecycleIntegrationTest {
         // 2. same signal from another sensor -> same alert updated, not a new one
         RuleMatchEvent second = event(signal, obs("sensor-b", -9, -38));
         alerts.apply(second);
-        Alert merged = active(signal);
+        AlertModel merged = active(signal);
         assertThat(merged.alertId()).isEqualTo(opened.alertId());
         assertThat(merged.occurrences()).isEqualTo(4);
         assertThat(merged.peakPowerDbm()).isEqualTo(-38);
@@ -90,7 +90,7 @@ class AlertLifecycleIntegrationTest {
         assertThat(ack.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(ack.getBody().get("state").asText()).isEqualTo("ACKNOWLEDGED");
         alerts.apply(event(signal, obs("sensor-a", -5, -40)));
-        Alert acked = active(signal);
+        AlertModel acked = active(signal);
         assertThat(acked.state()).isEqualTo(AlertState.ACKNOWLEDGED);
         assertThat(acked.occurrences()).isEqualTo(5);
 
@@ -109,7 +109,7 @@ class AlertLifecycleIntegrationTest {
 
         // 7. the emitter comes back -> a NEW alert
         alerts.apply(event(signal, obs("sensor-a", 0, -41)));
-        Alert reopened = active(signal);
+        AlertModel reopened = active(signal);
         assertThat(reopened.alertId()).isNotEqualTo(opened.alertId());
         assertThat(reopened.state()).isEqualTo(AlertState.OPEN);
 
@@ -119,9 +119,9 @@ class AlertLifecycleIntegrationTest {
         assertThat(open.get(0).get("alert_id").asText()).isEqualTo(reopened.alertId());
     }
 
-    private Alert awaitActive(String signal) throws InterruptedException {
+    private AlertModel awaitActive(String signal) throws InterruptedException {
         for (int i = 0; i < 100; i++) {
-            List<Alert> found = activeAlerts(signal);
+            List<AlertModel> found = activeAlerts(signal);
             if (!found.isEmpty()) {
                 return found.get(0);
             }
@@ -130,25 +130,25 @@ class AlertLifecycleIntegrationTest {
         throw new AssertionError("no active alert for " + signal);
     }
 
-    private Alert active(String signal) {
-        List<Alert> found = activeAlerts(signal);
+    private AlertModel active(String signal) {
+        List<AlertModel> found = activeAlerts(signal);
         assertThat(found).as("exactly one active alert for " + signal).hasSize(1);
         return found.get(0);
     }
 
-    private List<Alert> activeAlerts(String signal) {
+    private List<AlertModel> activeAlerts(String signal) {
         return alerts.find(null, null, null, null, null, 1000).stream()
                 .filter(a -> a.signalKey().equals(signal) && a.state() != AlertState.RESOLVED)
                 .toList();
     }
 
-    private RuleMatchEvent event(String signal, Observation... observations) {
+    private RuleMatchEvent event(String signal, ObservationModel... observations) {
         return new RuleMatchEvent(UUID.randomUUID().toString(), "rule-ism", "power_threshold", signal, Severity.HIGH,
                 60, List.of(observations));
     }
 
-    private Observation obs(String sensorId, int secondsFromNow, double powerDbm) {
-        return new Observation(OBSERVATION_IDS.incrementAndGet(), sensorId, now.plusSeconds(secondsFromNow),
-                2437.0, 20000.0, powerDbm, new Location(32.08, 34.78));
+    private ObservationModel obs(String sensorId, int secondsFromNow, double powerDbm) {
+        return new ObservationModel(OBSERVATION_IDS.incrementAndGet(), sensorId, now.plusSeconds(secondsFromNow),
+                2437.0, 20000.0, powerDbm, new LocationModel(32.08, 34.78));
     }
 }

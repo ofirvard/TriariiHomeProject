@@ -20,16 +20,16 @@ public class RuleService {
         this.events = events;
     }
 
-    public List<Rule> list() {
+    public List<RuleModel> list() {
         return repository.findAll();
     }
 
-    public Rule get(String ruleId) {
+    public RuleModel get(String ruleId) {
         return repository.findById(ruleId).orElseThrow(() -> notFound(ruleId));
     }
 
-    public Rule create(Rule body) {
-        Rule rule = validated(body.withDefaults());
+    public RuleModel create(RuleModel body) {
+        RuleModel rule = validated(body.withDefaults());
         if (!repository.insert(rule)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, "rule '" + rule.ruleId() + "' already exists");
         }
@@ -38,11 +38,11 @@ public class RuleService {
     }
 
     /** Full replace; also how a rule is enabled or disabled. The id in the path wins. */
-    public Rule update(String ruleId, Rule body) {
+    public RuleModel update(String ruleId, RuleModel body) {
         if (body.ruleId() != null && !body.ruleId().equals(ruleId)) {
             throw new ValidationFailedException(List.of("rule_id: does not match the id in the path"));
         }
-        Rule rule = validated(body.withRuleId(ruleId).withDefaults());
+        RuleModel rule = validated(body.withRuleId(ruleId).withDefaults());
         if (!repository.update(rule)) {
             throw notFound(ruleId);
         }
@@ -57,7 +57,7 @@ public class RuleService {
         events.publishEvent(new RuleChangedEvent(ruleId));
     }
 
-    private Rule validated(Rule rule) {
+    private RuleModel validated(RuleModel rule) {
         List<String> errors = validator.validate(rule);
         if (!errors.isEmpty()) {
             throw new ValidationFailedException(errors);

@@ -1,6 +1,6 @@
 package com.triarii.rf.alerts.alert;
 
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.common.Severity;
 import java.time.Instant;
@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.TreeSet;
 
 /** An alert. first_seen / last_seen are event time; the *_at fields are wall-clock audit times. */
-public record Alert(
+public record AlertModel(
         String alertId,
         String ruleId,
         String signalKey,
@@ -27,11 +27,11 @@ public record Alert(
         String resolvedReason) {
 
     /** A new OPEN alert from the first event of a signal. */
-    static Alert open(String alertId, RuleMatchEvent event) {
-        List<Observation> obs = event.observations();
-        Observation earliest = obs.stream().min(Comparator.comparing(Observation::timestamp))
+    static AlertModel open(String alertId, RuleMatchEvent event) {
+        List<ObservationModel> obs = event.observations();
+        ObservationModel earliest = obs.stream().min(Comparator.comparing(ObservationModel::timestamp))
                 .orElseThrow();
-        return new Alert(alertId, event.ruleId(), event.signalKey(), AlertState.OPEN, event.severity(),
+        return new AlertModel(alertId, event.ruleId(), event.signalKey(), AlertState.OPEN, event.severity(),
                 earliest.frequencyMhz(), sensors(List.of(), obs), firstSeen(obs), lastSeen(obs), obs.size(),
                 peak(obs), (int) event.resolveAfterS(), null, null, null);
     }
@@ -41,10 +41,10 @@ public record Alert(
      * out of order or after a retry give the same result. The state is untouched: acknowledged alerts keep
      * updating.
      */
-    Alert merge(List<Observation> obs) {
+    AlertModel merge(List<ObservationModel> obs) {
         Instant first = firstSeen(obs).isBefore(firstSeen) ? firstSeen(obs) : firstSeen;
         Instant last = lastSeen(obs).isAfter(lastSeen) ? lastSeen(obs) : lastSeen;
-        return new Alert(alertId, ruleId, signalKey, state, severity, frequencyMhz, sensors(sensorIds, obs),
+        return new AlertModel(alertId, ruleId, signalKey, state, severity, frequencyMhz, sensors(sensorIds, obs),
                 first, last, occurrences + obs.size(), Math.max(peakPowerDbm, peak(obs)), resolveAfterS,
                 acknowledgedAt, resolvedAt, resolvedReason);
     }
@@ -54,19 +54,19 @@ public record Alert(
         return eventTime.isAfter(lastSeen.plusSeconds(resolveAfterS));
     }
 
-    static Instant firstSeen(List<Observation> obs) {
-        return obs.stream().map(Observation::timestamp).min(Comparator.naturalOrder()).orElseThrow();
+    static Instant firstSeen(List<ObservationModel> obs) {
+        return obs.stream().map(ObservationModel::timestamp).min(Comparator.naturalOrder()).orElseThrow();
     }
 
-    private static Instant lastSeen(List<Observation> obs) {
-        return obs.stream().map(Observation::timestamp).max(Comparator.naturalOrder()).orElseThrow();
+    private static Instant lastSeen(List<ObservationModel> obs) {
+        return obs.stream().map(ObservationModel::timestamp).max(Comparator.naturalOrder()).orElseThrow();
     }
 
-    private static double peak(List<Observation> obs) {
-        return obs.stream().mapToDouble(Observation::powerDbm).max().orElseThrow();
+    private static double peak(List<ObservationModel> obs) {
+        return obs.stream().mapToDouble(ObservationModel::powerDbm).max().orElseThrow();
     }
 
-    private static List<String> sensors(List<String> existing, List<Observation> obs) {
+    private static List<String> sensors(List<String> existing, List<ObservationModel> obs) {
         TreeSet<String> merged = new TreeSet<>(existing);
         obs.forEach(o -> merged.add(o.sensorId()));
         return List.copyOf(merged);

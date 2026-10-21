@@ -1,10 +1,10 @@
 package com.triarii.rf.ingest.engine;
 
-import com.triarii.rf.common.Observation;
+import com.triarii.rf.common.ObservationModel;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.ingest.config.IngestProperties;
 import com.triarii.rf.ingest.messaging.EventPublisher;
-import com.triarii.rf.ingest.rule.Rule;
+import com.triarii.rf.ingest.rule.RuleModel;
 import com.triarii.rf.ingest.rule.RuleCache;
 import com.triarii.rf.ingest.rule.RuleChangedEvent;
 import io.micrometer.core.instrument.Counter;
@@ -55,12 +55,12 @@ public class RuleEngine {
     }
 
     /** Never throws: the observations are already committed, a failure here must not fail the request. */
-    public void process(List<Observation> observations) {
+    public void process(List<ObservationModel> observations) {
         try {
             List<RuleMatchEvent> events = new ArrayList<>();
-            List<Rule> enabled = rules.enabled();
+            List<RuleModel> enabled = rules.enabled();
             observations.stream()
-                    .sorted(Comparator.comparing(Observation::timestamp))
+                    .sorted(Comparator.comparing(ObservationModel::timestamp))
                     .forEach(obs -> {
                         Instant wm = watermark.accumulateAndGet(obs.timestamp(),
                                 (a, b) -> a.isAfter(b) ? a : b);
@@ -68,7 +68,7 @@ public class RuleEngine {
                             lateCounter.increment();
                             return;
                         }
-                        for (Rule rule : enabled) {
+                        for (RuleModel rule : enabled) {
                             RuleEvaluator evaluator = evaluators.get(rule.type());
                             if (evaluator != null) {
                                 events.addAll(evaluator.evaluate(rule, obs));

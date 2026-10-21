@@ -23,17 +23,17 @@ public class RuleRepository {
         this.jdbc = jdbc;
     }
 
-    public List<Rule> findAll() {
+    public List<RuleModel> findAll() {
         return jdbc.query("SELECT " + COLUMNS + " FROM rules ORDER BY rule_id", RuleRepository::map);
     }
 
-    public Optional<Rule> findById(String ruleId) {
+    public Optional<RuleModel> findById(String ruleId) {
         return jdbc.query("SELECT " + COLUMNS + " FROM rules WHERE rule_id = :ruleId",
                 new MapSqlParameterSource("ruleId", ruleId), RuleRepository::map).stream().findFirst();
     }
 
     /** @return false if a rule with this id already exists */
-    public boolean insert(Rule rule) {
+    public boolean insert(RuleModel rule) {
         return jdbc.update("""
                 INSERT INTO rules (rule_id, name, type, min_mhz, max_mhz, severity, enabled, resolve_after_s,
                                    threshold_dbm, min_duration_s, tolerance_khz, min_sensors, window_s)
@@ -44,7 +44,7 @@ public class RuleRepository {
     }
 
     /** @return false if no rule with this id exists */
-    public boolean update(Rule rule) {
+    public boolean update(RuleModel rule) {
         return jdbc.update("""
                 UPDATE rules SET name = :name, type = :type, min_mhz = :minMhz, max_mhz = :maxMhz,
                     severity = :severity, enabled = :enabled, resolve_after_s = :resolveAfterS,
@@ -61,7 +61,7 @@ public class RuleRepository {
                 new MapSqlParameterSource("ruleId", ruleId)) == 1;
     }
 
-    private static MapSqlParameterSource params(Rule rule) {
+    private static MapSqlParameterSource params(RuleModel rule) {
         return new MapSqlParameterSource()
                 .addValue("ruleId", rule.ruleId())
                 .addValue("name", rule.name())
@@ -78,12 +78,12 @@ public class RuleRepository {
                 .addValue("windowS", rule.windowS());
     }
 
-    private static Rule map(ResultSet rs, int row) throws SQLException {
-        return new Rule(
+    private static RuleModel map(ResultSet rs, int row) throws SQLException {
+        return new RuleModel(
                 rs.getString("rule_id"),
                 rs.getString("name"),
                 rs.getString("type"),
-                new Rule.Band(rs.getDouble("min_mhz"), rs.getDouble("max_mhz")),
+                new RuleModel.Band(rs.getDouble("min_mhz"), rs.getDouble("max_mhz")),
                 Severity.valueOf(rs.getString("severity")),
                 rs.getInt("resolve_after_s"),
                 rs.getBoolean("enabled"),
