@@ -3,6 +3,7 @@ package com.triarii.rf.ingest.observation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.triarii.rf.common.ObservationSnapshot;
 import com.triarii.rf.ingest.config.IngestProperties;
+import com.triarii.rf.ingest.engine.RuleEngine;
 import com.triarii.rf.ingest.observation.IngestResult.ItemError;
 import com.triarii.rf.ingest.sensor.SensorRepository;
 import io.micrometer.core.instrument.Counter;
@@ -22,16 +23,18 @@ public class ObservationService {
     private final ObservationRepository observations;
     private final SensorRepository sensors;
     private final TransactionTemplate transaction;
+    private final RuleEngine engine;
     private final IngestProperties properties;
     private final Counter acceptedCounter;
     private final Counter rejectedCounter;
 
     public ObservationService(ObservationParser parser, ObservationRepository observations, SensorRepository sensors,
-            TransactionTemplate transaction, IngestProperties properties, MeterRegistry meters) {
+            TransactionTemplate transaction, RuleEngine engine, IngestProperties properties, MeterRegistry meters) {
         this.parser = parser;
         this.observations = observations;
         this.sensors = sensors;
         this.transaction = transaction;
+        this.engine = engine;
         this.properties = properties;
         this.acceptedCounter = meters.counter("rf.observations", "result", "accepted");
         this.rejectedCounter = meters.counter("rf.observations", "result", "rejected");
@@ -39,7 +42,8 @@ public class ObservationService {
 
     /**
      * Accepts a single observation or an array. Partial acceptance: valid items are stored, invalid ones are
-     * reported by index. Observations and sensor last-seen are written in one transaction.
+     * reported by index. Observations and sensor last-seen are written in one transaction; rules are evaluated
+     * after the commit, on the stored rows (so events carry real observation ids).
      */
     public IngestResult ingest(JsonNode body) {
         List<JsonNode> items = items(body);
@@ -63,6 +67,7 @@ public class ObservationService {
                 sensors.upsertLastSeen(valid);
                 return rows;
             });
+            engine.process(stored);
         }
 
         acceptedCounter.increment(valid.size());
