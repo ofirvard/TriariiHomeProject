@@ -34,7 +34,7 @@ services:
     image: ${REGISTRY:-ghcr.io/ofirvard/triariihomeproject}/ingest-service:${IMAGE_TAG:-local}
     build:
       context: .
-      args: { SERVICE: ingest-service }
+      dockerfile: ingest-service/Dockerfile
     environment: *app-env
     depends_on:
       postgres: { condition: service_healthy }
@@ -47,7 +47,7 @@ services:
     image: ${REGISTRY:-ghcr.io/ofirvard/triariihomeproject}/alert-service:${IMAGE_TAG:-local}
     build:
       context: .
-      args: { SERVICE: alert-service }
+      dockerfile: alert-service/Dockerfile
     environment: *app-env
     depends_on:
       postgres: { condition: service_healthy }

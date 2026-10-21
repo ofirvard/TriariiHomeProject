@@ -1,24 +1,21 @@
-# One image definition for both services:
-#   docker build --build-arg SERVICE=ingest-service .
-#   docker build --build-arg SERVICE=alert-service .
+# ingest-service image. Build from the repository root (it needs the shared common module and the Gradle wrapper):
+#   docker build -f ingest-service/Dockerfile -t ingest-service .
 
-# --- build: compile the service's boot jar (tests run in CI, not here)
+# --- build: compile the boot jar (tests run in CI, not here)
 FROM eclipse-temurin:17-jdk-alpine AS build
-ARG SERVICE
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/root/.gradle \
-    sh ./gradlew --no-daemon -q ":${SERVICE}:bootJar" -x test \
-    && cp "${SERVICE}/build/libs/app.jar" /app.jar
+    sh ./gradlew --no-daemon -q :ingest-service:bootJar -x test
 
 # --- runtime: JRE only, non-root, with a health check
 FROM eclipse-temurin:17-jre-alpine
 RUN addgroup -S app && adduser -S app -G app
 WORKDIR /app
-COPY --from=build /app.jar app.jar
+COPY --from=build /src/ingest-service/build/libs/app.jar app.jar
 USER app
 
-# Both services listen on 8080 inside the container; all other config comes from env vars at runtime.
+# All other configuration comes from environment variables at runtime.
 ENV SERVER_PORT=8080
 EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
