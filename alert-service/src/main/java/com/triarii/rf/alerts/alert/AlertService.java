@@ -52,19 +52,20 @@ public class AlertService {
 
         Optional<AlertModel> active = alerts.findActiveForUpdate(event.signalKey());
         AlertModel alert;
-        if (active.isPresent() && active.get().expiredBefore(AlertModel.firstSeen(event.observations()))) {
+        Instant eventStart = AlertAggregation.firstSeen(event.observations());
+        if (active.isPresent() && eventStart.isAfter(active.get().lastSeen().plusSeconds(event.resolveAfterS()))) {
             // The sweeper has not run yet, but this alert is already past resolve_after_s: close it, start anew.
             resolved(alerts.resolve(active.get().alertId(), "AUTO", clock.instant()), active.get().severity(), "AUTO");
             active = Optional.empty();
         }
         if (active.isPresent()) {
-            alert = active.get().merge(event.observations());
+            alert = AlertAggregation.merge(active.get(), event.observations());
             alerts.updateAggregates(alert);
         } else {
-            alert = AlertModel.open(newAlertId(), event);
-            alerts.insert(alert);
+            alert = AlertAggregation.open(newAlertId(), event);
+            alerts.insert(alert, event.signalKey(), event.resolveAfterS());
             meters.counter("rf.alerts.opened", "severity", alert.severity().name()).increment();
-            log.info("Opened alert {} for {} ({})", alert.alertId(), alert.signalKey(), alert.severity());
+            log.info("Opened alert {} for {} ({})", alert.alertId(), event.signalKey(), alert.severity());
         }
         alerts.addObservations(alert.alertId(), event.observations());
     }
@@ -76,7 +77,7 @@ public class AlertService {
 
     public AlertDetails details(String alertId) {
         AlertModel alert = get(alertId);
-        return new AlertDetails(alert, alerts.countObservations(alertId),
+        return new AlertDetails(alert, alerts.findLifecycle(alertId), alerts.countObservations(alertId),
                 alerts.latestObservations(alertId, properties.detailObservations()));
     }
 

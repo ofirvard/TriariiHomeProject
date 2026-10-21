@@ -138,7 +138,7 @@ class AlertLifecycleIntegrationTest {
 
     private List<AlertModel> activeAlerts(String signal) {
         return alerts.find(null, null, null, null, null, 1000).stream()
-                .filter(a -> a.signalKey().equals(signal) && a.state() != AlertState.RESOLVED)
+                .filter(a -> a.ruleId().equals("rule-ism") && a.state() != AlertState.RESOLVED)
                 .toList();
     }
 

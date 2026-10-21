@@ -22,8 +22,8 @@ import org.springframework.stereotype.Repository;
 public class AlertRepository {
 
     private static final String COLUMNS = """
-            alert_id, rule_id, signal_key, state, severity, frequency_mhz, sensor_ids, first_seen, last_seen,
-            occurrences, peak_power_dbm, resolve_after_s, acknowledged_at, resolved_at, resolved_reason
+            alert_id, rule_id, state, severity, frequency_mhz, sensor_ids, first_seen, last_seen, occurrences,
+            peak_power_dbm
             """;
 
     // sensor_ids travel as a JSON array: NamedParameterJdbcTemplate would expand a Java array into "?, ?, ?".
@@ -55,11 +55,13 @@ public class AlertRepository {
                 new MapSqlParameterSource("alertId", alertId), this::map).stream().findFirst();
     }
 
-    public void insert(AlertModel alert) {
+    /** signal_key and resolve_after_s are stored for dedup and auto-resolve; they are not part of the model. */
+    public void insert(AlertModel alert, String signalKey, long resolveAfterS) {
         jdbc.update("INSERT INTO alerts (alert_id, rule_id, signal_key, state, severity, frequency_mhz, sensor_ids,"
                 + " first_seen, last_seen, occurrences, peak_power_dbm, resolve_after_s)"
                 + " VALUES (:alertId, :ruleId, :signalKey, :state, :severity, :frequencyMhz, " + SENSOR_ARRAY + ","
-                + " :firstSeen, :lastSeen, :occurrences, :peakPowerDbm, :resolveAfterS)", params(alert));
+                + " :firstSeen, :lastSeen, :occurrences, :peakPowerDbm, :resolveAfterS)",
+                params(alert).addValue("signalKey", signalKey).addValue("resolveAfterS", resolveAfterS));
     }
 
     public void updateAggregates(AlertModel alert) {
@@ -87,6 +89,14 @@ public class AlertRepository {
                 VALUES (:alertId, :observationId, :sensorId, :ts, :frequencyMhz, :bandwidthKhz, :powerDbm, :lat, :lon)
                 ON CONFLICT DO NOTHING
                 """, params);
+    }
+
+    public AlertDetails.Lifecycle findLifecycle(String alertId) {
+        return jdbc.queryForObject(
+                "SELECT acknowledged_at, resolved_at, resolved_reason FROM alerts WHERE alert_id = :alertId",
+                new MapSqlParameterSource("alertId", alertId),
+                (rs, row) -> new AlertDetails.Lifecycle(instant(rs, "acknowledged_at"), instant(rs, "resolved_at"),
+                        rs.getString("resolved_reason")));
     }
 
     public List<ObservationModel> latestObservations(String alertId, int limit) {
@@ -168,7 +178,6 @@ public class AlertRepository {
             return new MapSqlParameterSource()
                     .addValue("alertId", alert.alertId())
                     .addValue("ruleId", alert.ruleId())
-                    .addValue("signalKey", alert.signalKey())
                     .addValue("state", alert.state().name())
                     .addValue("severity", alert.severity().name())
                     .addValue("frequencyMhz", alert.frequencyMhz())
@@ -176,8 +185,7 @@ public class AlertRepository {
                     .addValue("firstSeen", utc(alert.firstSeen()))
                     .addValue("lastSeen", utc(alert.lastSeen()))
                     .addValue("occurrences", alert.occurrences())
-                    .addValue("peakPowerDbm", alert.peakPowerDbm())
-                    .addValue("resolveAfterS", alert.resolveAfterS());
+                    .addValue("peakPowerDbm", alert.peakPowerDbm());
         } catch (JsonProcessingException e) {
             throw new IllegalStateException(e);
         }
@@ -187,7 +195,6 @@ public class AlertRepository {
         return new AlertModel(
                 rs.getString("alert_id"),
                 rs.getString("rule_id"),
-                rs.getString("signal_key"),
                 AlertState.valueOf(rs.getString("state")),
                 Severity.valueOf(rs.getString("severity")),
                 rs.getDouble("frequency_mhz"),
@@ -195,11 +202,7 @@ public class AlertRepository {
                 instant(rs, "first_seen"),
                 instant(rs, "last_seen"),
                 rs.getInt("occurrences"),
-                rs.getDouble("peak_power_dbm"),
-                rs.getInt("resolve_after_s"),
-                instant(rs, "acknowledged_at"),
-                instant(rs, "resolved_at"),
-                rs.getString("resolved_reason"));
+                rs.getDouble("peak_power_dbm"));
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {
