@@ -21,6 +21,15 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USER}
     password: ${RABBITMQ_PASSWORD}
+    listener:
+      simple:
+        # retry a failing message a few times, then reject it to the dead-letter queue (never requeue forever)
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 500ms
+          multiplier: 2
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
