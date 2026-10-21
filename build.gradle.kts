@@ -40,4 +40,10 @@ subprojects {
     tasks.withType<Test> {
         useJUnitPlatform()
     }
+
+    // Reproducible jars: an unchanged module produces a byte-identical jar, so its Docker layers stay cached.
+    tasks.withType<AbstractArchiveTask> {
+        isPreserveFileTimestamps = false
+        isReproducibleFileOrder = true
+    }
 }

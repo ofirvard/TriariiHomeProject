@@ -19,6 +19,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # Caches dependencies and the Gradle build cache: unchanged modules are not recompiled or retested.
       - uses: gradle/actions/setup-gradle@v6
 
       # Checkstyle + unit tests + integration tests (Testcontainers: real Postgres and RabbitMQ)
@@ -27,6 +28,22 @@ jobs:
 
       - name: Lint shell scripts
         run: shellcheck simulator.sh deploy/smoke-test.sh
+
+      # Package once; the publish stage ships exactly these tested jars instead of building again.
+      - name: Package jars
+        if: github.event_name == 'push'
+        run: ./gradlew bootJar
+
+      - name: Hand the jars to the publish stage
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: jars
+          path: |
+            ingest-service/build/libs/app.jar
+            alert-service/build/libs/app.jar
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Keep test and lint reports
         if: failure()
