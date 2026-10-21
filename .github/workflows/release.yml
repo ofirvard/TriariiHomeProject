@@ -1,0 +1,81 @@
+# Stage: give a verified build its version. Both images share one version, which goes up by one minor
+# version per release (v0.1.0, v0.2.0, ...). The verified images are re-tagged in the registry (no rebuild),
+# and a GitHub Release with generated notes creates the matching git tag.
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: Tag of the verified images, normally the commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io/ofirvard/triariihomeproject
+
+jobs:
+  release:
+    name: Release version
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # all tags, to find the latest version
+
+      - name: Choose the version
+        id: version
+        env:
+          SHA: ${{ inputs.image_tag }}
+        run: |
+          # A re-run for an already released commit keeps its version instead of taking a new one.
+          existing=$(git tag --points-at "$SHA" --list 'v*.*.*' | head -1)
+          if [[ -n "$existing" ]]; then
+            { echo "version=$existing"; echo "new=false"; } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          latest=$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)
+          if [[ -z "$latest" ]]; then
+            next="v0.1.0"
+          else
+            IFS=. read -r major minor _ <<< "${latest#v}"
+            next="v${major}.$((minor + 1)).0"
+          fi
+          { echo "version=$next"; echo "previous=$latest"; echo "new=true"; } >> "$GITHUB_OUTPUT"
+          echo "Releasing $next (previous: ${latest:-none})"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the verified images with the version and latest
+        env:
+          SHA: ${{ inputs.image_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for service in ingest-service alert-service; do
+            docker buildx imagetools create \
+              -t "$REGISTRY/$service:$VERSION" \
+              -t "$REGISTRY/$service:latest" \
+              "$REGISTRY/$service:$SHA"
+          done
+
+      - name: Create the GitHub Release and git tag
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.image_tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+        run: |
+          # Notes list the pull requests merged since the previous version (all of them for the first one).
+          gh release create "$VERSION" --target "$SHA" --title "$VERSION" --generate-notes \
+            ${PREVIOUS:+--notes-start-tag "$PREVIOUS"}
