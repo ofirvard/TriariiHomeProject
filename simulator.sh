@@ -122,7 +122,7 @@ alert_status() {
         return
     fi
     echo "            alerts (newest first):"
-    sed 's/},{/}\n{/g' <<<"$body" | sed -E \
+    printf '%s\n' "${body//'},{'/$'}\n{'}" | sed -E \
         's/.*"alert_id":"([^"]*)".*"rule_id":"([^"]*)".*"state":"([A-Z]+)".*"frequency_mhz":([0-9.]+).*"sensor_ids":\[([^]]*)\].*"occurrences":([0-9]+).*/              \1  \3  \2  \4 MHz  occurrences=\6  sensors=[\5]/' \
         | tr -d '"'
 }

@@ -89,7 +89,8 @@ public class ObservationRepository {
 
     /** Known sensors and their last-seen time (event time), derived from the observations. */
     public List<SensorModel> findSensors() {
-        return jdbc.query("SELECT sensor_id, max(ts) AS last_seen FROM observations GROUP BY sensor_id ORDER BY sensor_id",
+        return jdbc.query(
+                "SELECT sensor_id, max(ts) AS last_seen FROM observations GROUP BY sensor_id ORDER BY sensor_id",
                 (rs, row) -> new SensorModel(rs.getString("sensor_id"),
                         rs.getObject("last_seen", OffsetDateTime.class).toInstant()));
     }

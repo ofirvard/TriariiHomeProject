@@ -16,6 +16,15 @@ allprojects {
 
 subprojects {
     apply(plugin = "java")
+    apply(plugin = "checkstyle")
+
+    // Lint: runs as part of `./gradlew check`, rules in config/checkstyle/checkstyle.xml
+    extensions.configure<CheckstyleExtension> {
+        toolVersion = "10.21.4"
+        configFile = rootProject.file("config/checkstyle/checkstyle.xml")
+        isIgnoreFailures = false
+        maxWarnings = 0
+    }
 
     extensions.configure<JavaPluginExtension> {
         sourceCompatibility = JavaVersion.VERSION_17
