@@ -31,6 +31,7 @@ sensors ──HTTP──> nginx ──> ingest-service ──RabbitMQ──> ale
 
 ```bash
 cp .env.example .env          # then set real passwords in .env
+./gradlew bootJar             # the images package these jars; nothing is compiled inside Docker
 docker compose up -d --build --wait
 ```
 

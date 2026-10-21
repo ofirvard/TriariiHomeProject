@@ -1,0 +1,3 @@
+# The build context is only the packaged jar.
+*
+!build/libs/app.jar

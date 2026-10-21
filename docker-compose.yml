@@ -32,9 +32,7 @@ services:
 
   ingest-service:
     image: ${REGISTRY:-ghcr.io/ofirvard/triariihomeproject}/ingest-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: ingest-service/Dockerfile
+    build: ./ingest-service   # packages ingest-service/build/libs/app.jar: run ./gradlew bootJar first
     environment: *app-env
     depends_on:
       postgres: { condition: service_healthy }
@@ -45,9 +43,7 @@ services:
 
   alert-service:
     image: ${REGISTRY:-ghcr.io/ofirvard/triariihomeproject}/alert-service:${IMAGE_TAG:-local}
-    build:
-      context: .
-      dockerfile: alert-service/Dockerfile
+    build: ./alert-service   # packages alert-service/build/libs/app.jar: run ./gradlew bootJar first
     environment: *app-env
     depends_on:
       postgres: { condition: service_healthy }
