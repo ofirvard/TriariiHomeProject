@@ -1,4 +1,4 @@
-package com.triarii.rf.ingest.observation;
+package com.triarii.rf.common;
 
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;

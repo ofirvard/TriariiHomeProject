@@ -3,6 +3,8 @@ package com.triarii.rf.ingest.observation;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.triarii.rf.common.Observation;
 import com.triarii.rf.ingest.config.IngestProperties;
 import com.triarii.rf.ingest.observation.IngestResult.ItemError;
 import jakarta.validation.ConstraintViolation;
@@ -10,12 +12,13 @@ import jakarta.validation.Validator;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
-/** Turns one JSON item into a {@link NewObservation}, or into the list of reasons it was rejected. */
+/** Turns one JSON item into a validated {@link Observation}, or into the list of reasons it was rejected. */
 @Component
 public class ObservationParser {
 
@@ -37,7 +40,7 @@ public class ObservationParser {
     public sealed interface Parsed permits Valid, Invalid {
     }
 
-    public record Valid(NewObservation observation) implements Parsed {
+    public record Valid(Observation observation) implements Parsed {
     }
 
     public record Invalid(List<ItemError> errors) implements Parsed {
@@ -47,49 +50,56 @@ public class ObservationParser {
         if (!item.isObject()) {
             return invalid(index, "$", "must be a JSON object");
         }
+        ObjectNode node = ((ObjectNode) item).deepCopy();
+        node.remove("id"); // assigned by the database
+        List<ItemError> errors = new ArrayList<>();
 
-        ObservationRequest request;
+        // Checked on the raw JSON: Jackson alone would also accept offsets like +03:00 or epoch numbers.
+        JsonNode timestamp = node.get("timestamp");
+        if (timestamp != null && !timestamp.isNull() && !isUtc(timestamp)) {
+            errors.add(new ItemError(index, "timestamp", UTC_HINT));
+            node.remove("timestamp");
+        }
+
+        Observation observation;
         try {
-            request = objectMapper.treeToValue(item, ObservationRequest.class);
+            observation = objectMapper.treeToValue(node, Observation.class);
         } catch (JsonMappingException e) {
             return invalid(index, fieldOf(e), "has an invalid type or format");
         } catch (Exception e) {
             return invalid(index, "$", "could not be read");
         }
 
-        List<ItemError> errors = validator.validate(request).stream()
-                .map(v -> new ItemError(index, snakeCase(v), v.getMessage()))
-                .collect(Collectors.toList());
-
-        Instant timestamp = null;
-        if (request.timestamp() != null && !request.timestamp().isBlank()) {
-            timestamp = parseUtc(request.timestamp());
-            if (timestamp == null) {
-                errors.add(new ItemError(index, "timestamp", UTC_HINT));
-            } else if (timestamp.isAfter(clock.instant().plus(properties.maxFutureSkew()))) {
-                errors.add(new ItemError(index, "timestamp",
-                        "is too far in the future (max skew " + properties.maxFutureSkew() + ")"));
+        boolean timestampReported = !errors.isEmpty();
+        for (ConstraintViolation<Observation> violation : validator.validate(observation)) {
+            String field = snakeCase(violation);
+            if (!(timestampReported && field.equals("timestamp"))) {
+                errors.add(new ItemError(index, field, violation.getMessage()));
             }
+        }
+        if (observation.timestamp() != null
+                && observation.timestamp().isAfter(clock.instant().plus(properties.maxFutureSkew()))) {
+            errors.add(new ItemError(index, "timestamp",
+                    "is too far in the future (max skew " + properties.maxFutureSkew() + ")"));
         }
 
         if (!errors.isEmpty()) {
             errors.sort(Comparator.comparing(ItemError::field));
             return new Invalid(errors);
         }
-
-        return new Valid(new NewObservation(request.sensorId(), timestamp, request.frequencyMhz(),
-                request.bandwidthKhz(), request.powerDbm(), request.location().lat(), request.location().lon()));
+        return new Valid(observation);
     }
 
-    /** Only an explicit UTC 'Z' suffix is accepted; returns null when the value is not ISO-8601 UTC. */
-    private static Instant parseUtc(String value) {
-        if (!value.endsWith("Z")) {
-            return null;
+    /** Only an explicit UTC 'Z' suffix is accepted. */
+    private static boolean isUtc(JsonNode value) {
+        if (!value.isTextual() || !value.asText().endsWith("Z")) {
+            return false;
         }
         try {
-            return Instant.parse(value);
+            Instant.parse(value.asText());
+            return true;
         } catch (DateTimeParseException e) {
-            return null;
+            return false;
         }
     }
 

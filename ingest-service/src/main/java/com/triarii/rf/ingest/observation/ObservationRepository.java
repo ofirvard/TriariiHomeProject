@@ -1,6 +1,7 @@
 package com.triarii.rf.ingest.observation;
 
-import com.triarii.rf.common.ObservationSnapshot;
+import com.triarii.rf.common.Location;
+import com.triarii.rf.common.Observation;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -33,8 +34,8 @@ public class ObservationRepository {
         this.jdbc = jdbc;
     }
 
-    /** Batch insert; returns the stored rows (with ids) in input order. */
-    public List<ObservationSnapshot> insertAll(List<NewObservation> observations) {
+    /** Batch insert; returns the observations with their new ids, in input order. */
+    public List<Observation> insertAll(List<Observation> observations) {
         SqlParameterSource[] params = observations.stream()
                 .map(o -> new MapSqlParameterSource()
                         .addValue("sensorId", o.sensorId())
@@ -42,24 +43,22 @@ public class ObservationRepository {
                         .addValue("frequencyMhz", o.frequencyMhz())
                         .addValue("bandwidthKhz", o.bandwidthKhz())
                         .addValue("powerDbm", o.powerDbm())
-                        .addValue("lat", o.lat())
-                        .addValue("lon", o.lon()))
+                        .addValue("lat", o.location().lat())
+                        .addValue("lon", o.location().lon()))
                 .toArray(SqlParameterSource[]::new);
         GeneratedKeyHolder keys = new GeneratedKeyHolder();
         jdbc.batchUpdate(INSERT, params, keys, new String[] {"id"});
 
-        List<ObservationSnapshot> stored = new ArrayList<>(observations.size());
+        List<Observation> stored = new ArrayList<>(observations.size());
         for (int i = 0; i < observations.size(); i++) {
-            NewObservation o = observations.get(i);
             long id = ((Number) keys.getKeyList().get(i).get("id")).longValue();
-            stored.add(new ObservationSnapshot(id, o.sensorId(), o.timestamp(), o.frequencyMhz(),
-                    o.bandwidthKhz(), o.powerDbm(), o.lat(), o.lon()));
+            stored.add(observations.get(i).withId(id));
         }
         return stored;
     }
 
     /** All filters are optional (null = not applied). Newest first. */
-    public List<ObservationSnapshot> find(String sensorId, Double minMhz, Double maxMhz, Instant from, Instant to,
+    public List<Observation> find(String sensorId, Double minMhz, Double maxMhz, Instant from, Instant to,
             int limit) {
         StringBuilder sql = new StringBuilder(SELECT);
         MapSqlParameterSource params = new MapSqlParameterSource("limit", limit);
@@ -87,19 +86,18 @@ public class ObservationRepository {
         return jdbc.query(sql.toString(), params, ObservationRepository::map);
     }
 
-    private static ObservationSnapshot map(ResultSet rs, int row) throws SQLException {
-        return new ObservationSnapshot(
+    private static Observation map(ResultSet rs, int row) throws SQLException {
+        return new Observation(
                 rs.getLong("id"),
                 rs.getString("sensor_id"),
                 rs.getObject("ts", OffsetDateTime.class).toInstant(),
                 rs.getDouble("frequency_mhz"),
                 rs.getDouble("bandwidth_khz"),
                 rs.getDouble("power_dbm"),
-                rs.getDouble("lat"),
-                rs.getDouble("lon"));
+                new Location(rs.getDouble("lat"), rs.getDouble("lon")));
     }
 
-    static OffsetDateTime utc(Instant instant) {
+    private static OffsetDateTime utc(Instant instant) {
         return instant.atOffset(ZoneOffset.UTC);
     }
 }

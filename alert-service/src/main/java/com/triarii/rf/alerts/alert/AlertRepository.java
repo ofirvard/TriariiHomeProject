@@ -2,7 +2,8 @@ package com.triarii.rf.alerts.alert;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.triarii.rf.common.ObservationSnapshot;
+import com.triarii.rf.common.Location;
+import com.triarii.rf.common.Observation;
 import com.triarii.rf.common.Severity;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -67,7 +68,7 @@ public class AlertRepository {
                 + " updated_at = now() WHERE alert_id = :alertId", params(alert));
     }
 
-    public void addObservations(String alertId, List<ObservationSnapshot> observations) {
+    public void addObservations(String alertId, List<Observation> observations) {
         SqlParameterSource[] params = observations.stream()
                 .map(o -> new MapSqlParameterSource()
                         .addValue("alertId", alertId)
@@ -77,8 +78,8 @@ public class AlertRepository {
                         .addValue("frequencyMhz", o.frequencyMhz())
                         .addValue("bandwidthKhz", o.bandwidthKhz())
                         .addValue("powerDbm", o.powerDbm())
-                        .addValue("lat", o.lat())
-                        .addValue("lon", o.lon()))
+                        .addValue("lat", o.location().lat())
+                        .addValue("lon", o.location().lon()))
                 .toArray(SqlParameterSource[]::new);
         jdbc.batchUpdate("""
                 INSERT INTO alert_observations
@@ -88,14 +89,14 @@ public class AlertRepository {
                 """, params);
     }
 
-    public List<ObservationSnapshot> latestObservations(String alertId, int limit) {
+    public List<Observation> latestObservations(String alertId, int limit) {
         return jdbc.query("""
                 SELECT observation_id, sensor_id, ts, frequency_mhz, bandwidth_khz, power_dbm, lat, lon
                 FROM alert_observations WHERE alert_id = :alertId ORDER BY ts DESC LIMIT :limit
                 """, new MapSqlParameterSource("alertId", alertId).addValue("limit", limit),
-                (rs, row) -> new ObservationSnapshot(rs.getLong("observation_id"), rs.getString("sensor_id"),
+                (rs, row) -> new Observation(rs.getLong("observation_id"), rs.getString("sensor_id"),
                         instant(rs, "ts"), rs.getDouble("frequency_mhz"), rs.getDouble("bandwidth_khz"),
-                        rs.getDouble("power_dbm"), rs.getDouble("lat"), rs.getDouble("lon")));
+                        rs.getDouble("power_dbm"), new Location(rs.getDouble("lat"), rs.getDouble("lon"))));
     }
 
     public int countObservations(String alertId) {

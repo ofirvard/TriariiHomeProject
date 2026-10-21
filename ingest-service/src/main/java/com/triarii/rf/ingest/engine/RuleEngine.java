@@ -1,6 +1,6 @@
 package com.triarii.rf.ingest.engine;
 
-import com.triarii.rf.common.ObservationSnapshot;
+import com.triarii.rf.common.Observation;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.ingest.config.IngestProperties;
 import com.triarii.rf.ingest.messaging.EventPublisher;
@@ -55,12 +55,12 @@ public class RuleEngine {
     }
 
     /** Never throws: the observations are already committed, a failure here must not fail the request. */
-    public void process(List<ObservationSnapshot> observations) {
+    public void process(List<Observation> observations) {
         try {
             List<RuleMatchEvent> events = new ArrayList<>();
             List<Rule> enabled = rules.enabled();
             observations.stream()
-                    .sorted(Comparator.comparing(ObservationSnapshot::timestamp))
+                    .sorted(Comparator.comparing(Observation::timestamp))
                     .forEach(obs -> {
                         Instant wm = watermark.accumulateAndGet(obs.timestamp(),
                                 (a, b) -> a.isAfter(b) ? a : b);

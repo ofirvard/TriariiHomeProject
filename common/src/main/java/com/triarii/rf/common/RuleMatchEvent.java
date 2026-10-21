@@ -18,5 +18,5 @@ public record RuleMatchEvent(
         String signalKey,
         Severity severity,
         long resolveAfterS,
-        List<ObservationSnapshot> observations) {
+        List<Observation> observations) {
 }

@@ -1,6 +1,6 @@
 package com.triarii.rf.alerts.alert;
 
-import com.triarii.rf.common.ObservationSnapshot;
+import com.triarii.rf.common.Observation;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.common.Severity;
 import java.time.Instant;
@@ -28,8 +28,8 @@ public record Alert(
 
     /** A new OPEN alert from the first event of a signal. */
     static Alert open(String alertId, RuleMatchEvent event) {
-        List<ObservationSnapshot> obs = event.observations();
-        ObservationSnapshot earliest = obs.stream().min(Comparator.comparing(ObservationSnapshot::timestamp))
+        List<Observation> obs = event.observations();
+        Observation earliest = obs.stream().min(Comparator.comparing(Observation::timestamp))
                 .orElseThrow();
         return new Alert(alertId, event.ruleId(), event.signalKey(), AlertState.OPEN, event.severity(),
                 earliest.frequencyMhz(), sensors(List.of(), obs), firstSeen(obs), lastSeen(obs), obs.size(),
@@ -41,7 +41,7 @@ public record Alert(
      * out of order or after a retry give the same result. The state is untouched: acknowledged alerts keep
      * updating.
      */
-    Alert merge(List<ObservationSnapshot> obs) {
+    Alert merge(List<Observation> obs) {
         Instant first = firstSeen(obs).isBefore(firstSeen) ? firstSeen(obs) : firstSeen;
         Instant last = lastSeen(obs).isAfter(lastSeen) ? lastSeen(obs) : lastSeen;
         return new Alert(alertId, ruleId, signalKey, state, severity, frequencyMhz, sensors(sensorIds, obs),
@@ -54,19 +54,19 @@ public record Alert(
         return eventTime.isAfter(lastSeen.plusSeconds(resolveAfterS));
     }
 
-    static Instant firstSeen(List<ObservationSnapshot> obs) {
-        return obs.stream().map(ObservationSnapshot::timestamp).min(Comparator.naturalOrder()).orElseThrow();
+    static Instant firstSeen(List<Observation> obs) {
+        return obs.stream().map(Observation::timestamp).min(Comparator.naturalOrder()).orElseThrow();
     }
 
-    private static Instant lastSeen(List<ObservationSnapshot> obs) {
-        return obs.stream().map(ObservationSnapshot::timestamp).max(Comparator.naturalOrder()).orElseThrow();
+    private static Instant lastSeen(List<Observation> obs) {
+        return obs.stream().map(Observation::timestamp).max(Comparator.naturalOrder()).orElseThrow();
     }
 
-    private static double peak(List<ObservationSnapshot> obs) {
-        return obs.stream().mapToDouble(ObservationSnapshot::powerDbm).max().orElseThrow();
+    private static double peak(List<Observation> obs) {
+        return obs.stream().mapToDouble(Observation::powerDbm).max().orElseThrow();
     }
 
-    private static List<String> sensors(List<String> existing, List<ObservationSnapshot> obs) {
+    private static List<String> sensors(List<String> existing, List<Observation> obs) {
         TreeSet<String> merged = new TreeSet<>(existing);
         obs.forEach(o -> merged.add(o.sensorId()));
         return List.copyOf(merged);

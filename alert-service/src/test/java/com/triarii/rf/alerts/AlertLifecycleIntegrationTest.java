@@ -7,7 +7,8 @@ import com.triarii.rf.alerts.alert.Alert;
 import com.triarii.rf.alerts.alert.AlertService;
 import com.triarii.rf.alerts.alert.AlertState;
 import com.triarii.rf.common.Messaging;
-import com.triarii.rf.common.ObservationSnapshot;
+import com.triarii.rf.common.Location;
+import com.triarii.rf.common.Observation;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.common.Severity;
 import java.time.Duration;
@@ -141,13 +142,13 @@ class AlertLifecycleIntegrationTest {
                 .toList();
     }
 
-    private RuleMatchEvent event(String signal, ObservationSnapshot... observations) {
+    private RuleMatchEvent event(String signal, Observation... observations) {
         return new RuleMatchEvent(UUID.randomUUID().toString(), "rule-ism", "power_threshold", signal, Severity.HIGH,
                 60, List.of(observations));
     }
 
-    private ObservationSnapshot obs(String sensorId, int secondsFromNow, double powerDbm) {
-        return new ObservationSnapshot(OBSERVATION_IDS.incrementAndGet(), sensorId, now.plusSeconds(secondsFromNow),
-                2437.0, 20000, powerDbm, 32.08, 34.78);
+    private Observation obs(String sensorId, int secondsFromNow, double powerDbm) {
+        return new Observation(OBSERVATION_IDS.incrementAndGet(), sensorId, now.plusSeconds(secondsFromNow),
+                2437.0, 20000.0, powerDbm, new Location(32.08, 34.78));
     }
 }

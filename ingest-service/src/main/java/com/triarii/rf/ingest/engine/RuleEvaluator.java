@@ -1,6 +1,6 @@
 package com.triarii.rf.ingest.engine;
 
-import com.triarii.rf.common.ObservationSnapshot;
+import com.triarii.rf.common.Observation;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.ingest.rule.Rule;
 import java.time.Instant;
@@ -12,7 +12,7 @@ public interface RuleEvaluator {
     String type();
 
     /** @return events to publish for this observation (usually none) */
-    List<RuleMatchEvent> evaluate(Rule rule, ObservationSnapshot observation);
+    List<RuleMatchEvent> evaluate(Rule rule, Observation observation);
 
     /** Drop all state for a rule (it was changed, disabled or deleted). */
     void forget(String ruleId);

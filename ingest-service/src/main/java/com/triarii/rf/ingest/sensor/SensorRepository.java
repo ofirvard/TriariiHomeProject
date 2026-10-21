@@ -1,7 +1,7 @@
 package com.triarii.rf.ingest.sensor;
 
-import com.triarii.rf.ingest.observation.Location;
-import com.triarii.rf.ingest.observation.NewObservation;
+import com.triarii.rf.common.Location;
+import com.triarii.rf.common.Observation;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Collection;
@@ -35,18 +35,18 @@ public class SensorRepository {
     }
 
     /** One upsert per sensor, using that sensor's newest observation in the batch. */
-    public void upsertLastSeen(List<NewObservation> observations) {
-        BinaryOperator<NewObservation> newest = BinaryOperator.maxBy(Comparator.comparing(NewObservation::timestamp));
-        Collection<NewObservation> latest = observations.stream()
-                .collect(Collectors.toMap(NewObservation::sensorId, o -> o, newest))
+    public void upsertLastSeen(List<Observation> observations) {
+        BinaryOperator<Observation> newest = BinaryOperator.maxBy(Comparator.comparing(Observation::timestamp));
+        Collection<Observation> latest = observations.stream()
+                .collect(Collectors.toMap(Observation::sensorId, o -> o, newest))
                 .values();
         SqlParameterSource[] params = latest.stream()
-                .sorted(Comparator.comparing(NewObservation::sensorId)) // stable lock order across requests
+                .sorted(Comparator.comparing(Observation::sensorId)) // stable lock order across requests
                 .map(o -> new MapSqlParameterSource()
                         .addValue("sensorId", o.sensorId())
                         .addValue("lastSeen", o.timestamp().atOffset(ZoneOffset.UTC))
-                        .addValue("lat", o.lat())
-                        .addValue("lon", o.lon()))
+                        .addValue("lat", o.location().lat())
+                        .addValue("lon", o.location().lon()))
                 .toArray(SqlParameterSource[]::new);
         jdbc.batchUpdate(UPSERT, params);
     }

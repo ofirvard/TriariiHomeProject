@@ -1,7 +1,7 @@
 package com.triarii.rf.ingest.observation;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.triarii.rf.common.ObservationSnapshot;
+import com.triarii.rf.common.Observation;
 import com.triarii.rf.ingest.config.IngestProperties;
 import com.triarii.rf.ingest.engine.RuleEngine;
 import com.triarii.rf.ingest.observation.IngestResult.ItemError;
@@ -48,7 +48,7 @@ public class ObservationService {
     public IngestResult ingest(JsonNode body) {
         List<JsonNode> items = items(body);
 
-        List<NewObservation> valid = new ArrayList<>(items.size());
+        List<Observation> valid = new ArrayList<>(items.size());
         List<ItemError> errors = new ArrayList<>();
         int rejected = 0;
         for (int i = 0; i < items.size(); i++) {
@@ -62,8 +62,8 @@ public class ObservationService {
         }
 
         if (!valid.isEmpty()) {
-            List<ObservationSnapshot> stored = transaction.execute(status -> {
-                List<ObservationSnapshot> rows = observations.insertAll(valid);
+            List<Observation> stored = transaction.execute(status -> {
+                List<Observation> rows = observations.insertAll(valid);
                 sensors.upsertLastSeen(valid);
                 return rows;
             });
@@ -75,11 +75,9 @@ public class ObservationService {
         return new IngestResult(valid.size(), rejected, errors);
     }
 
-    public List<ObservationView> query(String sensorId, Double minMhz, Double maxMhz, Instant from, Instant to,
+    public List<Observation> query(String sensorId, Double minMhz, Double maxMhz, Instant from, Instant to,
             int limit) {
-        return observations.find(sensorId, minMhz, maxMhz, from, to, limit).stream()
-                .map(ObservationView::from)
-                .toList();
+        return observations.find(sensorId, minMhz, maxMhz, from, to, limit);
     }
 
     private List<JsonNode> items(JsonNode body) {

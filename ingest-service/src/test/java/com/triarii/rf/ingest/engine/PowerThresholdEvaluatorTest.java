@@ -2,7 +2,8 @@ package com.triarii.rf.ingest.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.triarii.rf.common.ObservationSnapshot;
+import com.triarii.rf.common.Location;
+import com.triarii.rf.common.Observation;
 import com.triarii.rf.common.RuleMatchEvent;
 import com.triarii.rf.common.Severity;
 import com.triarii.rf.ingest.config.IngestProperties;
@@ -54,7 +55,7 @@ class PowerThresholdEvaluatorTest {
         List<RuleMatchEvent> events = feed("sensor-03", IntStream.of(1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 10), 2437.0, -40);
 
         assertThat(events).hasSize(1);
-        List<Instant> timestamps = events.get(0).observations().stream().map(ObservationSnapshot::timestamp).toList();
+        List<Instant> timestamps = events.get(0).observations().stream().map(Observation::timestamp).toList();
         assertThat(timestamps).hasSize(11).isSorted();
     }
 
@@ -96,7 +97,7 @@ class PowerThresholdEvaluatorTest {
                 feed(s % 2 == 0 ? "sensor-a" : "sensor-b", IntStream.of(s), 2437.0, -40)));
 
         assertThat(events).hasSize(1);
-        assertThat(events.get(0).observations()).extracting(ObservationSnapshot::sensorId)
+        assertThat(events.get(0).observations()).extracting(Observation::sensorId)
                 .containsOnly("sensor-a", "sensor-b");
     }
 
@@ -120,8 +121,8 @@ class PowerThresholdEvaluatorTest {
 
     private List<RuleMatchEvent> feed(String sensorId, IntStream seconds, double frequencyMhz, double powerDbm) {
         List<RuleMatchEvent> events = new ArrayList<>();
-        seconds.forEach(s -> events.addAll(evaluator.evaluate(RULE, new ObservationSnapshot(nextId++, sensorId,
-                T0.plusSeconds(s), frequencyMhz, 20000, powerDbm, 32.08, 34.78))));
+        seconds.forEach(s -> events.addAll(evaluator.evaluate(RULE, new Observation(nextId++, sensorId,
+                T0.plusSeconds(s), frequencyMhz, 20000.0, powerDbm, new Location(32.08, 34.78)))));
         return events;
     }
 }
