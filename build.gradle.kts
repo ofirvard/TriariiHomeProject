@@ -3,7 +3,7 @@ plugins {
 }
 
 val springBootVersion = "3.5.6"
-val testcontainersVersion = "1.21.3"
+val testcontainersVersion = "1.21.4"
 
 allprojects {
     group = "com.triarii.rf"
