@@ -1,0 +1,11 @@
+# Seeded at startup (insert-if-absent): rules changed through the API survive restarts.
+rules:
+  - rule_id: rule-ism-high-power
+    name: High power in protected ISM band
+    type: power_threshold
+    band: { min_mhz: 2400.0, max_mhz: 2483.5 }
+    threshold_dbm: -50.0
+    min_duration_s: 10
+    resolve_after_s: 60
+    severity: HIGH
+    enabled: true

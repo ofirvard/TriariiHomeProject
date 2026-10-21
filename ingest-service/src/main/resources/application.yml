@@ -1,0 +1,45 @@
+# All runtime configuration comes from environment variables (no secrets in the repo).
+# For local runs, a gitignored .env in the repo root is picked up as a properties file.
+spring:
+  config:
+    import:
+      - optional:file:.env[.properties]
+      - optional:file:../.env[.properties]
+  application:
+    name: ingest-service
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:rf}
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+    hikari:
+      schema: ingest
+  flyway:
+    schemas: ingest
+    default-schema: ingest
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USER}
+    password: ${RABBITMQ_PASSWORD}
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+
+server:
+  port: ${SERVER_PORT:8081}
+
+# /health (incl. DB + broker) and /metrics (Prometheus) at the root, as the spec asks.
+management:
+  endpoints:
+    web:
+      base-path: /
+      exposure:
+        include: health, prometheus
+      path-mapping:
+        prometheus: metrics
+  endpoint:
+    health:
+      show-details: always
+
+rf:
+  rules-file: ${RULES_FILE:classpath:rules.yaml}
