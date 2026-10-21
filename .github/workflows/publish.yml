@@ -1,5 +1,6 @@
 # Stage: package both images from the jars CI built and push them to GHCR, tagged with the given tag
-# (the commit SHA) and latest. Docker layers are cached, so an unchanged jar is not re-packaged.
+# (the commit SHA). Version and latest tags are added by the release stage, only after verify passes.
+# Docker layers are cached, so an unchanged jar is not re-packaged.
 name: Publish
 
 on:
@@ -45,9 +46,7 @@ jobs:
         with:
           context: ${{ matrix.service }}
           push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ matrix.service }}:${{ inputs.image_tag }}
-            ${{ env.REGISTRY }}/${{ matrix.service }}:latest
+          tags: ${{ env.REGISTRY }}/${{ matrix.service }}:${{ inputs.image_tag }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
