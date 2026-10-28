@@ -99,6 +99,11 @@ Key decisions and trade-offs, what is not production-ready, and what I would imp
   A gcloud script rather than Terraform: one VM, one network, two firewall rules, no state file to keep.
 - **Network**: a dedicated VPC whose firewall allows only tcp 22 and 80 (the `default` network also opens
   RDP and ICMP), plus ufw on the host. SSH stays open for `gcloud compute ssh`; IAP-only SSH would be tighter.
+  A static IP, so a stop/start keeps the address.
+- **Version visible in GCP**: each deploy sets the VM's `app-version` label. The VM runs as its own service
+  account (`rf-vm-sa`) with a custom role that can only read instances and set their labels, instead of the
+  default compute account (Editor on the project). No key is created; the VM gets tokens from the metadata
+  server. The pipeline cannot label the VM itself without a GCP credential in GitHub.
 - **Reaching the VM from CI: a self-hosted GitHub Actions runner on the VM.** The runner connects *out* to
   GitHub and long-polls for jobs, so no SSH key or GCP credential is stored in GitHub, and the same design
   works for a VM with no public IP at all (e.g. a local VM). Deploy, Verify and Rollback run on it (`runs-on: [self-hosted, rf-vm]`); CI and Build &
