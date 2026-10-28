@@ -46,3 +46,4 @@ bin/
 ### Not part of the deliverable ###
 .idea/
 *.pdf
+CLAUDE.md

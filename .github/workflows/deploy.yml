@@ -1,0 +1,47 @@
+# Stage Deploy: run exactly the published :<sha> images on the VM. The job runs on the self-hosted runner
+# inside the VM, which connects out to GitHub, so CI needs no inbound access or SSH key to reach the VM.
+# If the new containers do not become healthy, the previous deployment is restored and the stage fails.
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      image_tag:
+        description: Tag of the images to deploy, normally the commit SHA
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    name: Deploy to the VM
+    runs-on: [self-hosted, rf-vm]
+    # One deployment at a time, shared with Rollback.
+    concurrency: deploy-vm
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy
+        id: deploy
+        env:
+          IMAGE_TAG: ${{ inputs.image_tag }}
+        run: bash deploy/deploy.sh "$IMAGE_TAG"
+
+      - name: Show logs on failure
+        if: failure()
+        working-directory: /opt/rf-alert-manager
+        run: docker compose logs --tail 200
+
+      # A deployment that does not come up healthy is replaced by the one that ran before it.
+      - name: Roll back to the previous deployment
+        if: failure() && steps.deploy.outcome == 'failure'
+        run: bash deploy/deploy.sh --previous

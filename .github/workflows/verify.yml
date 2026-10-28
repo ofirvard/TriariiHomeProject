@@ -1,7 +1,8 @@
-# Stage Verify: run the full stack from the images just published, smoke-test it through nginx, and only if
-# that passes, tag the build with the next version. Both images share one version, which goes up by one
-# minor version per release (v0.1.0, v0.2.0, ...); the verified images are re-tagged in the registry (no
-# rebuild) and a GitHub Release with generated notes creates the matching git tag.
+# Stage Verify: smoke-test the deployment on the VM through nginx. If it fails, the VM is rolled back to the
+# previous deployment automatically and the pipeline fails. Only if it passes, tag the build with the next
+# version. Both images share one version, which goes up by one minor version per release (v0.1.0, v0.2.0,
+# ...); the verified images are re-tagged in the registry (no rebuild) and a GitHub Release with generated
+# notes creates the matching git tag.
 name: Verify
 
 on:
@@ -21,40 +22,33 @@ env:
 
 jobs:
   smoke-test:
-    name: Smoke test
-    runs-on: ubuntu-24.04
+    name: Smoke test on the VM
+    runs-on: [self-hosted, rf-vm]
     permissions:
       contents: read
       packages: read
     steps:
       - uses: actions/checkout@v5
 
+      - name: Smoke test
+        id: smoke
+        run: bash deploy/smoke-test.sh http://localhost
+
+      - name: Show logs on failure
+        if: failure()
+        working-directory: /opt/rf-alert-manager
+        run: docker compose logs --tail 200
+
       - uses: docker/login-action@v3
+        if: failure() && steps.smoke.outcome == 'failure'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Start the stack with the images to verify
-        env:
-          IMAGE_TAG: ${{ inputs.image_tag }}
-        run: |
-          {
-            echo "DB_USER=rf"
-            echo "DB_PASSWORD=$(openssl rand -hex 16)"
-            echo "RABBITMQ_USER=rf"
-            echo "RABBITMQ_PASSWORD=$(openssl rand -hex 16)"
-            echo "IMAGE_TAG=$IMAGE_TAG"
-          } > .env
-          docker compose pull ingest-service alert-service
-          docker compose up -d --no-build --wait
-
-      - name: Smoke test
-        run: deploy/smoke-test.sh http://localhost
-
-      - name: Show logs on failure
-        if: failure()
-        run: docker compose logs --tail 200
+      - name: Roll back to the previous deployment
+        if: failure() && steps.smoke.outcome == 'failure'
+        run: bash deploy/deploy.sh --previous
 
   tag:
     name: Tag version
