@@ -121,8 +121,10 @@ Key decisions and trade-offs, what is not production-ready, and what I would imp
   `/opt/rf-alert-manager`, sets `IMAGE_TAG` in its `.env`, `docker compose pull` and `up -d --wait`, so the
   step fails if a container does not become healthy. Exactly the `:<sha>` images CI built are deployed.
 - **Rollback**: automatic when Deploy (unhealthy) or Verify (smoke test) fails: `deploy.sh --previous`
-  returns to the tag recorded in `previous-tag`. Manual: the Rollback workflow, with an empty version (the
-  previous deployment) or any published tag; every build stays in GHCR, so nothing is rebuilt. Rollback
+  returns to the last deployment that came up healthy (`history` on the VM, so a failed build is never a
+  rollback target, and repeated rollbacks keep going back). Manual: the Rollback workflow, with an empty
+  version (the previous deployment) or any published tag; every build stays in GHCR, so nothing is
+  rebuilt. The Rollback drill workflow proves the automatic path end to end with a broken release. Rollback
   uses the current compose file and does not undo database migrations, so a migration must stay compatible
   with the previous version (additive only).
 - **Start on boot**: Docker is enabled and every container has `restart: unless-stopped`; the runner is a

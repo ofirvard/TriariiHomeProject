@@ -12,6 +12,11 @@ on:
         description: Tag of the images to verify, normally the commit SHA
         required: true
         type: string
+      release:
+        description: Tag a version if the smoke test passes (false for the rollback drill)
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -53,6 +58,7 @@ jobs:
   tag:
     name: Tag version
     needs: smoke-test
+    if: inputs.release
     runs-on: ubuntu-24.04
     # One tagging run at a time, so two builds never take the same version.
     concurrency: tag-version

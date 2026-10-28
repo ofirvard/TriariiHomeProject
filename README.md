@@ -193,3 +193,7 @@ the VM's **Observability** tab. On the VM itself: `sudo docker compose logs -f` 
   VM goes back to the previous deployment and the pipeline fails.
 - **Manual**: **Actions → Rollback → Run workflow**. Leave the version empty to return to the deployment
   before the current one, or enter any published tag (`v0.2.0`, a commit SHA). It redeploys and smoke-tests.
+- **Drill**: **Actions → Rollback drill → Run workflow** ships a deliberately broken release
+  (`MAX_BATCH_SIZE=0`: healthy, but rejects every observation) through the real Deploy and Verify stages.
+  Deploy succeeds, Verify's smoke test fails and rolls back, and "Confirm the rollback" checks that the VM
+  runs the previous version and passes the smoke test. The run is red because Verify fails, as it should.
