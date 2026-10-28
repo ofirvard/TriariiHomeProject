@@ -103,7 +103,7 @@ Sensors are not a table: `GET /api/v1/sensors` is `max(ts)` per `sensor_id` over
 ```
 
 - Startup is health-gated: services wait for healthy Postgres/RabbitMQ; nginx waits for healthy services.
-- Configuration comes from `/opt/rf-alert-manager/.env` (passwords generated on the VM at provisioning, `IMAGE_TAG` set by each deploy); nothing secret is in the repo or images. `previous-tag` next to it records the deployment to roll back to.
+- Configuration comes from `/opt/rf-alert-manager/.env` (passwords generated on the VM at provisioning, `IMAGE_TAG` set by each deploy); nothing secret is in the repo or images. `history` next to it lists the deployments that came up healthy, which rollback walks back through.
 - Images: `ghcr.io/ofirvard/triariihomeproject/{ingest-service,alert-service}`, tagged with the commit SHA, the version (`v0.N.0`) and `latest`.
 
 ## CI/CD
