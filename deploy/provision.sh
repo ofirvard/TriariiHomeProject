@@ -85,7 +85,7 @@ chown -R "$RUNNER_USER:$RUNNER_USER" "$DEPLOY_DIR"
 if [[ -f "$RUNNER_DIR/.runner" ]]; then
     echo "Runner already registered"
 elif [[ -z "${GH_RUNNER_TOKEN:-}" ]]; then
-    echo "GH_RUNNER_TOKEN not set: runner not registered. Re-run: GH_RUNNER_TOKEN=<token> deploy/gcp-vm.sh"
+    echo "GH_RUNNER_TOKEN not set: runner not registered. Re-run: PROJECT=<id> GH_RUNNER_TOKEN=<token> deploy/gcp-vm.sh"
 else
     version=$(curl -fsSL https://api.github.com/repos/actions/runner/releases/latest \
         | sed -nE 's/.*"tag_name": *"v([^"]+)".*/\1/p')

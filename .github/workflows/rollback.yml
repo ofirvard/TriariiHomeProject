@@ -35,7 +35,7 @@ jobs:
         run: bash deploy/deploy.sh "${VERSION:---previous}"
 
       - name: Smoke test
-        run: deploy/smoke-test.sh http://localhost
+        run: bash deploy/smoke-test.sh http://localhost
 
       - name: Show logs on failure
         if: failure()
