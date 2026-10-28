@@ -83,19 +83,27 @@ Sensors are not a table: `GET /api/v1/sensors` is `max(ts)` per `sensor_id` over
 ## Deployment topology
 
 ```
- Docker host (compose project "rf-alert-manager", one bridge network)
- ┌───────────────────────────────────────────────────────────────────┐
- │  nginx :80 ◀── only published port                                 │
- │     ├──▶ ingest-service :8080  (512 MB limit, non-root, healthcheck)│
- │     └──▶ alert-service  :8080  (512 MB limit, non-root, healthcheck)│
- │  postgres :5432   ── volume pg-data                                 │
- │  rabbitmq :5672   ── volume rabbitmq-data                           │
- │  all: restart unless-stopped, json-file logs 10 MB × 3             │
- └───────────────────────────────────────────────────────────────────┘
+ GCP project, VPC "rf-net" (firewall: tcp 22 + 80 only)          GitHub
+   http://<vm-ip> ──┐                                               Actions ◀─ outbound HTTPS (long poll) ─┐
+                    │                                               GHCR    ◀─ docker pull ──────────────┐ │
+ ┌──────────────────▼─────────────────────────────────────────────────────────────────────┐            │ │
+ │ VM rf-vm: Compute Engine e2-medium, Ubuntu 24.04, ufw 22 + 80, journald 200 MB         │            │ │
+ │                                                                                        │            │ │
+ │  actions runner (service, user "runner", label rf-vm) ─────────────────────────────────┼────────────┼─┘
+ │     runs deploy/deploy.sh + smoke-test.sh in /opt/rf-alert-manager                     │            │
+ │                                                                                        │            │
+ │  Docker (on boot), compose project "rf-alert-manager", one bridge network ─────────────┼────────────┘
+ │   nginx :80 ◀── only published port                                                    │
+ │     ├──▶ ingest-service :8080  (512 MB limit, non-root, healthcheck)                   │
+ │     └──▶ alert-service  :8080  (512 MB limit, non-root, healthcheck)                   │
+ │   postgres :5432   ── volume pg-data                                                   │
+ │   rabbitmq :5672   ── volume rabbitmq-data                                             │
+ │   all: restart unless-stopped, json-file logs 10 MB × 3                                │
+ └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 - Startup is health-gated: services wait for healthy Postgres/RabbitMQ; nginx waits for healthy services.
-- Configuration comes from a `.env` next to the compose file (passwords, `IMAGE_TAG`); nothing secret is in the repo or images.
+- Configuration comes from `/opt/rf-alert-manager/.env` (passwords generated on the VM at provisioning, `IMAGE_TAG` set by each deploy); nothing secret is in the repo or images. `previous-tag` next to it records the deployment to roll back to.
 - Images: `ghcr.io/ofirvard/triariihomeproject/{ingest-service,alert-service}`, tagged with the commit SHA, the version (`v0.N.0`) and `latest`.
 
 ## CI/CD
@@ -104,11 +112,14 @@ GitHub Actions, `.github/workflows/pipeline.yml` calling one reusable workflow p
 
 ```
 pull request:          ci
-merge to main/manual:  ci ──▶ build-publish ──▶ verify (smoke test ──▶ tag version)
+merge to main/manual:  ci ──▶ build-publish ──▶ deploy (VM) ──▶ verify (smoke test on VM ──▶ tag version)
+manual:                rollback
 ```
 
 | Stage | Runs | What it does |
 |---|---|---|
 | `ci.yml` | every PR and merge | Checkstyle, unit + Testcontainers integration tests, shellcheck; on merges packages the jars as an artifact. Required check on `main`. |
 | `build-publish.yml` | merge to main | Builds both images from the tested jars (no recompilation), pushes `:<sha>` to GHCR with layer caching. |
-| `verify.yml` | after publish | Starts the full compose stack from exactly the `:<sha>` images, runs `deploy/smoke-test.sh`; on success tags `v0.N.0` + `latest` (registry re-tag, no rebuild) and creates the GitHub Release. |
+| `deploy.yml` | after publish | On the VM's self-hosted runner: `deploy/deploy.sh <sha>` pulls exactly the `:<sha>` images and restarts the stack (`up --wait`); if it is not healthy, restores the previous deployment. |
+| `verify.yml` | after deploy | On the VM: `deploy/smoke-test.sh` through nginx; on failure rolls back and fails. On success tags `v0.N.0` + `latest` (registry re-tag, no rebuild) and creates the GitHub Release. |
+| `rollback.yml` | manual | On the VM: redeploys a given tag (or the previous deployment) and smoke-tests it. |

@@ -20,6 +20,8 @@ sensors ──HTTP──> nginx ──> ingest-service ──RabbitMQ──> ale
 | `docker-compose.yml`, `deploy/nginx.conf` | The deployed stack: nginx, both services, PostgreSQL, RabbitMQ |
 | `docker-compose.dev.yml` | PostgreSQL and RabbitMQ only, for running the services from an IDE |
 | `simulator.sh` | Traffic simulator |
+| `deploy/gcp-vm.sh`, `deploy/provision.sh` | The deployment VM on GCP and its provisioning |
+| `deploy/deploy.sh`, `deploy/smoke-test.sh` | Deploy / rollback and smoke test, run on the VM by the pipeline |
 
 ## Prerequisites
 
@@ -144,5 +146,43 @@ All configuration is through environment variables; nothing secret is in the rep
 
 ## VM provisioning and deployment
 
-Not done yet: provisioning the Linux VM and deploying to it through the CI/CD pipeline will be documented
-here.
+The deployment target is an Ubuntu 24.04 VM on Google Compute Engine (`e2-medium`), created by
+`deploy/gcp-vm.sh` and provisioned by `deploy/provision.sh`: its own VPC network whose firewall lets in only
+SSH and HTTP, Docker with bounded logs, ufw, a `.env` of passwords generated on the VM, and a self-hosted
+GitHub Actions runner. The pipeline deploys through that runner, so no SSH key or cloud credential is stored
+in GitHub.
+
+Prerequisites: a GCP project with billing enabled (the free trial credit covers this VM), and the
+[gcloud CLI](https://cloud.google.com/sdk/docs/install), signed in with `gcloud auth login`.
+
+1. Get a runner registration token: repository **Settings → Actions → Runners → New self-hosted runner**
+   (Linux x64), copy the token from the `config.sh` line. It is valid for one hour.
+2. Create and provision the VM (from bash: Linux, WSL or Git Bash):
+
+   ```bash
+   PROJECT=<gcp-project-id> GH_RUNNER_TOKEN=<token> deploy/gcp-vm.sh
+   ```
+
+   It prints the VM's address, and the runner `rf-vm` (label `rf-vm`) appears as Idle under Settings →
+   Actions → Runners. The script is safe to run again; without `GH_RUNNER_TOKEN` it skips the runner.
+   `ZONE`, `VM_NAME` and `MACHINE_TYPE` override the defaults.
+3. Deploy: merge to `main`, or **Actions → Pipeline → Run workflow**. Build & Publish pushes the images,
+   Deploy runs them on the VM, Verify smoke-tests the VM.
+4. Use it at `http://<vm-ip>`:
+
+   ```bash
+   curl http://<vm-ip>/health
+   ./simulator.sh -u http://<vm-ip> -a http://<vm-ip>
+   ```
+
+The VM restarts everything on boot (Docker, the stack, the runner). To look at it:
+`gcloud compute ssh rf-vm --zone us-central1-a`, then `cd /opt/rf-alert-manager && docker compose ps`.
+To remove it: `gcloud compute instances delete rf-vm --zone us-central1-a` (and the `rf-net` firewall
+rules and network).
+
+### Rollback
+
+- **Automatic**: if the new containers do not become healthy (Deploy) or the smoke test fails (Verify), the
+  VM goes back to the previous deployment and the pipeline fails.
+- **Manual**: **Actions → Rollback → Run workflow**. Leave the version empty to return to the deployment
+  before the current one, or enter any published tag (`v0.2.0`, a commit SHA). It redeploys and smoke-tests.

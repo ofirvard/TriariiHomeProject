@@ -73,7 +73,7 @@ Key decisions and trade-offs, what is not production-ready, and what I would imp
 ## CI/CD
 
 - GitHub Actions, one entry workflow (`pipeline.yml`) calling one reusable workflow per stage.
-  PRs run CI only; merges to `main` (or a manual run) run CI → Build & Publish → Verify.
+  PRs run CI only; merges to `main` (or a manual run) run CI → Build & Publish → Deploy → Verify.
 - **Merge blocking**: the repository is public so branch protection is available; `main` requires a PR
   and a passing `ci / Lint and test`.
 - **Lint**: a deliberately small Checkstyle rule set plus shellcheck.
@@ -84,21 +84,47 @@ Key decisions and trade-offs, what is not production-ready, and what I would imp
 - **Caching**: Gradle build cache (persisted by `setup-gradle`) so unchanged modules are neither recompiled
   nor retested; reproducible jars so an unchanged module gives a byte-identical jar; Docker layer cache
   (GHA backend) so an unchanged jar is not re-packaged.
-- Secrets: the pipeline uses only the built-in `GITHUB_TOKEN`; Verify generates throwaway passwords.
+- Secrets: the pipeline uses only the built-in `GITHUB_TOKEN` (GHCR push and pull). The stack's passwords
+  are generated on the VM at provisioning and never leave it.
 
-## VM deployment: not done
+## VM and deployment
 
-A local Ubuntu 24.04 VM (Vagrant + VirtualBox, since Windows Home has no Hyper-V) with a self-hosted GitHub
-Actions runner was designed and started: the runner connects *out* to GitHub, which solves "the CI runner
-cannot reach a local VM" without opening ports or storing SSH keys, and Deploy/Verify/Rollback would run on
-it. It was dropped for time. Consequences:
-
-- **Deploy stage is missing.** Verify runs the exact published images as a full production-like stack on
-  the CI runner and smoke-tests that, instead of a deployed service.
-- **Rollback** is not automated; every version stays in GHCR (`:<sha>`, `:v0.N.0`), so returning to a
-  previous version means running the stack with that tag (`IMAGE_TAG=v0.1.0 docker compose up -d`).
-- VM provisioning as code, start on boot (Docker enabled + `restart: unless-stopped`), firewall (22/80
-  only) and host-level log limits were part of the design but are not in the repository.
+- **VM: Ubuntu 24.04 on Google Compute Engine** (`e2-medium`, 2 vCPU / 4 GB), created by `deploy/gcp-vm.sh`
+  (gcloud) and provisioned by `deploy/provision.sh`. A local VirtualBox VM (Vagrant) was tried first, since
+  Windows Home has no Hyper-V: on this host the Windows hypervisor is always on (virtualization-based
+  security, WSL2), so VirtualBox runs on top of it without VT-x. The guest booted only about 1 in 3 times
+  (hangs in early boot) and its clock ran 7-10x fast, which breaks every timer this system depends on.
+  Turning the Windows hypervisor off would fix that but also disables WSL2 and Docker Desktop. A cloud VM
+  avoids all of it. The free-tier `e2-micro` (1 GB) is too small for two JVMs, Postgres and RabbitMQ.
+  A gcloud script rather than Terraform: one VM, one network, two firewall rules, no state file to keep.
+- **Network**: a dedicated VPC whose firewall allows only tcp 22 and 80 (the `default` network also opens
+  RDP and ICMP), plus ufw on the host. SSH stays open for `gcloud compute ssh`; IAP-only SSH would be tighter.
+- **Reaching the VM from CI: a self-hosted GitHub Actions runner on the VM.** The runner connects *out* to
+  GitHub and long-polls for jobs, so no SSH key or GCP credential is stored in GitHub, and the same design
+  works for a VM with no public IP at all (e.g. a local VM). Deploy, Verify and Rollback run on it (`runs-on: [self-hosted, rf-vm]`); CI and Build &
+  Publish stay on GitHub-hosted runners. Alternatives: SSH from a GitHub-hosted runner needs an SSH key (or
+  a GCP service-account key) as a repository secret and port 22 open to GitHub's whole IP range; a
+  pull-based agent (Watchtower) deploys whatever is pushed, so the pipeline could not run Verify against the
+  exact deployment or fail on it.
+- **Security of the runner**: the repository is public, and a self-hosted runner executes job code. Only
+  jobs gated to pushes on `main` and manual runs target it; pull requests only run CI on GitHub-hosted
+  runners. The runner user may use Docker (effectively root on the VM) but has no sudo. For a real system:
+  an ephemeral runner or a private repository.
+- **Deploy** (`deploy/deploy.sh <tag>`): copies the compose file and nginx config from the checkout to
+  `/opt/rf-alert-manager`, sets `IMAGE_TAG` in its `.env`, `docker compose pull` and `up -d --wait`, so the
+  step fails if a container does not become healthy. Exactly the `:<sha>` images CI built are deployed.
+- **Rollback**: automatic when Deploy (unhealthy) or Verify (smoke test) fails: `deploy.sh --previous`
+  returns to the tag recorded in `previous-tag`. Manual: the Rollback workflow, with an empty version (the
+  previous deployment) or any published tag; every build stays in GHCR, so nothing is rebuilt. Rollback
+  uses the current compose file and does not undo database migrations, so a migration must stay compatible
+  with the previous version (additive only).
+- **Start on boot**: Docker is enabled and every container has `restart: unless-stopped`; the runner is a
+  systemd service. **Ports**: ufw allows only 22 and 80, and only nginx publishes a port. **Logs**: Docker
+  `json-file` 10 MB × 3 per container (daemon default and compose), journald capped at 200 MB.
+- **Deployment is not zero-downtime**: `up -d` recreates the services, so requests fail for the few
+  seconds a Spring Boot service takes to start. Sensors would need to retry.
+- **Manual steps**: a GCP project with billing and a signed-in gcloud, and a runner registration token from
+  GitHub (valid one hour) passed to `deploy/gcp-vm.sh`. Everything else is code.
 
 ## Not production-ready
 
@@ -116,8 +142,8 @@ it. It was dropped for time. Consequences:
 
 ## With more time
 
-1. Finish the VM: Vagrant + provisioning script, self-hosted runner, Deploy stage, Verify against the VM,
-   one-click Rollback workflow taking a version.
+1. Zero-downtime deployment (two replicas per service behind nginx, rolled one at a time); an ephemeral
+   runner.
 2. Transactional outbox for match events; dead-letter queue.
 3. Persist rule-engine windows so ingest-service is stateless and scalable.
 4. `multi_sensor` and `sensor_silence` rules.
