@@ -1,7 +1,9 @@
 # The pipeline. Each stage is its own reusable workflow.
 #   pull request        CI
-#   merge to main       CI -> Build & Publish -> Verify (smoke test, then tag the version)
+#   merge to main       CI -> Build & Publish -> Deploy (VM) -> Verify (smoke test on the VM, then tag the version)
 #   manual (on main)    Actions -> "Pipeline" -> Run workflow: the same as a merge
+#   rollback            Actions -> "Rollback" -> Run workflow (rollback.yml)
+# Deploy and Verify run on the self-hosted runner inside the VM; pull requests never reach it.
 name: Pipeline
 
 on:
@@ -30,8 +32,17 @@ jobs:
     with:
       image_tag: ${{ github.sha }}
 
-  verify:
+  deploy:
     needs: build-publish
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      image_tag: ${{ github.sha }}
+
+  verify:
+    needs: deploy
     permissions:
       contents: write
       packages: write
