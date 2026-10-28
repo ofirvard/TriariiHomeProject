@@ -2,6 +2,7 @@
 # Provisions the deployment VM (Ubuntu 24.04). Run as root by deploy/gcp-vm.sh; safe to run again.
 #   - Docker Engine + compose plugin, started on boot, container logs capped
 #   - host firewall: only SSH and HTTP (the GCP firewall allows the same)
+#   - Google Cloud Ops Agent: logs (including every container's) and metrics in Cloud Logging / Monitoring
 #   - /opt/rf-alert-manager with a .env of passwords generated here (never in the repository)
 #   - a GitHub Actions runner as a service, which runs the Deploy, Verify and Rollback jobs
 set -euo pipefail
@@ -26,13 +27,36 @@ fi
 
 # Bounded logs: every container (compose sets the same limit) and the journal.
 cat > /etc/docker/daemon.json <<'EOF'
-{ "log-driver": "json-file", "log-opts": { "max-size": "10m", "max-file": "3" } }
+{ "log-driver": "json-file",
+  "log-opts": { "max-size": "10m", "max-file": "3", "labels": "com.docker.compose.service" } }
 EOF
 mkdir -p /etc/systemd/journald.conf.d
 printf '[Journal]\nSystemMaxUse=200M\n' > /etc/systemd/journald.conf.d/size.conf
 systemctl restart systemd-journald
 systemctl enable docker
 systemctl restart docker
+
+# Google Cloud Ops Agent: host metrics and logs, plus every container's log, in Cloud Logging. The compose
+# service name is added to each container log line (json-file "labels" option above).
+if ! dpkg -s google-cloud-ops-agent > /dev/null 2>&1; then
+    curl -fsSL https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh | bash -s -- --also-install
+fi
+cat > /etc/google-cloud-ops-agent/config.yaml <<'EOF'
+logging:
+  receivers:
+    docker:
+      type: files
+      include_paths: [/var/lib/docker/containers/*/*.log]
+  processors:
+    docker_json:
+      type: parse_json
+  service:
+    pipelines:
+      docker:
+        receivers: [docker]
+        processors: [docker_json]
+EOF
+systemctl restart google-cloud-ops-agent
 
 # Only SSH and HTTP. Docker publishes ports past ufw, but only nginx publishes one.
 ufw allow 22/tcp

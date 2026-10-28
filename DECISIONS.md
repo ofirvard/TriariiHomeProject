@@ -125,7 +125,10 @@ Key decisions and trade-offs, what is not production-ready, and what I would imp
   with the previous version (additive only).
 - **Start on boot**: Docker is enabled and every container has `restart: unless-stopped`; the runner is a
   systemd service. **Ports**: ufw allows only 22 and 80, and only nginx publishes a port. **Logs**: Docker
-  `json-file` 10 MB × 3 per container (daemon default and compose), journald capped at 200 MB.
+  `json-file` 10 MB × 3 per container (daemon default and compose), journald capped at 200 MB. The Google
+  Cloud Ops Agent tails the container log files into Cloud Logging (tagged with the compose service name)
+  and sends host metrics, so logs are searchable without SSH and outlive the local rotation. It costs about
+  150 MB of RAM; the service account gets only Logs Writer and Monitoring Metric Writer.
 - **Deployment is not zero-downtime**: `up -d` recreates the services, so requests fail for the few
   seconds a Spring Boot service takes to start. Sensors would need to retry.
 - **Manual steps**: a GCP project with billing and a signed-in gcloud, and a runner registration token from
