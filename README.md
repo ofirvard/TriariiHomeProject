@@ -175,10 +175,12 @@ Prerequisites: a GCP project with billing enabled (the free trial credit covers 
    ./simulator.sh -u http://<vm-ip> -a http://<vm-ip>
    ```
 
-The VM restarts everything on boot (Docker, the stack, the runner). To look at it:
-`gcloud compute ssh rf-vm --zone us-central1-a`, then `cd /opt/rf-alert-manager && docker compose ps`.
-To remove it: `gcloud compute instances delete rf-vm --zone us-central1-a` (and the `rf-net` firewall
-rules and network).
+The VM restarts everything on boot (Docker, the stack, the runner). The running version is the VM's
+`app-version` label (GCP console → Compute Engine → rf-vm, dots shown as dashes: `v0-3-0`), set by each
+deploy and rollback. To look at it: `gcloud compute ssh rf-vm --zone us-central1-a`, then
+`cd /opt/rf-alert-manager && docker compose ps`. To remove everything, delete the GCP project (or the VM,
+the `rf-vm-ip` address, the `rf-net` firewall rules and network, the `rf-vm-sa` service account and the
+`rfVmLabeler` role).
 
 ### Rollback
 
