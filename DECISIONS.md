@@ -100,7 +100,9 @@ Key decisions and trade-offs, what is not production-ready, and what I would imp
 - **Network**: a dedicated VPC whose firewall allows only tcp 22 and 80 (the `default` network also opens
   RDP and ICMP), plus ufw on the host. SSH stays open for `gcloud compute ssh`; IAP-only SSH would be tighter.
   A static IP, so a stop/start keeps the address.
-- **Version visible in GCP**: each deploy sets the VM's `app-version` label. The VM runs as its own service
+- **Version visible in GCP**: the VM's `app-version` label shows the running version tag
+  (`deploy/label-version.sh`): a deploy or rollback looks up the tag on the deployed commit (`unreleased`
+  until Verify tags a new one), and Verify sets it once the version is chosen. The VM runs as its own service
   account (`rf-vm-sa`) with a custom role that can only read instances and set their labels, instead of the
   default compute account (Editor on the project). No key is created; the VM gets tokens from the metadata
   server. The pipeline cannot label the VM itself without a GCP credential in GitHub.

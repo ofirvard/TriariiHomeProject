@@ -30,10 +30,4 @@ docker compose pull --quiet
 docker compose up -d --no-build --wait --remove-orphans
 docker image prune -f > /dev/null   # old tags stay in the registry; keep the disk clean
 echo "Deployed $tag"
-
-# On GCP, show the running version as the VM's app-version label (label values allow no dots).
-md() { curl -fsS --max-time 2 -H Metadata-Flavor:Google "http://metadata.google.internal/computeMetadata/v1/instance/$1"; }
-if zone=$(md zone 2> /dev/null); then
-    gcloud compute instances add-labels "$(md name)" --zone "${zone##*/}" --labels "app-version=${tag//./-}" \
-        --quiet || echo "Could not set the app-version label" >&2
-fi
+bash "$REPO_DIR/deploy/label-version.sh" "$tag" || echo "Could not set the app-version label" >&2

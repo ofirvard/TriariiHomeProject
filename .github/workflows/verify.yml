@@ -2,7 +2,7 @@
 # previous deployment automatically and the pipeline fails. Only if it passes, tag the build with the next
 # version. Both images share one version, which goes up by one minor version per release (v0.1.0, v0.2.0,
 # ...); the verified images are re-tagged in the registry (no rebuild) and a GitHub Release with generated
-# notes creates the matching git tag.
+# notes creates the matching git tag. Last, the VM's app-version label shows that version.
 name: Verify
 
 on:
@@ -56,6 +56,8 @@ jobs:
     runs-on: ubuntu-24.04
     # One tagging run at a time, so two builds never take the same version.
     concurrency: tag-version
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -113,3 +115,17 @@ jobs:
           # Notes list the pull requests merged since the previous version.
           gh release create "$VERSION" --target "$SHA" --title "$VERSION" --generate-notes \
             ${PREVIOUS:+--notes-start-tag "$PREVIOUS"}
+
+  label:
+    name: Show the version on the VM
+    needs: tag
+    runs-on: [self-hosted, rf-vm]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set the app-version label
+        env:
+          VERSION: ${{ needs.tag.outputs.version }}
+        run: bash deploy/label-version.sh "$VERSION"
