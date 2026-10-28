@@ -1,165 +1,96 @@
 # Decisions
 
-Key decisions and trade-offs, what is not production-ready, and what I would improve with more time.
+## Stack
 
-## Language, framework, database, broker
+- **Java 17 + Spring Boot 3.5** instead of the preferred Python: the stack I am fastest in; Spring gives
+  health, Prometheus metrics, validation, JDBC, AMQP and migrations nearly for free.
+- **PostgreSQL**, one instance with a schema per service: the queries are multi-column filters (sensor +
+  frequency + time; state + severity + sensor + frequency), which is plain indexed SQL.
+- **JDBC (`NamedParameterJdbcTemplate`), not JPA**: explicit SQL, batch inserts, no ORM surprises.
+  **Flyway**: each service migrates its own schema at startup.
+- **RabbitMQ**: the traffic is task delivery to one consumer, not an event log. Durable queues, acks and
+  retries by configuration, first-class Spring support, light. Kafka was overkill; Redis Streams needs more
+  hand-written consumer code.
+- **Service split at "detection vs. state"**: ingest-service decides a condition holds and publishes a
+  self-contained event; alert-service owns dedup and lifecycle and never calls back.
 
-- **Java 17 + Spring Boot 3.5** instead of the preferred Python: it is the stack I am fastest and most
-  accurate in, and Spring gives health, Prometheus metrics, validation, JDBC, AMQP and migrations nearly for
-  free. Java 17 because that is the installed JDK; nothing here needs 21.
-- **PostgreSQL** for both services (separate schemas, one instance): the queries are multi-column filters
-  (sensor + frequency range + time range, state + severity + sensor + frequency) that are plain indexed SQL.
-  Redis was considered as the only store but would have needed hand-built secondary indexes. One instance
-  with a schema per service keeps the services' data separate without a second database container.
-- **JDBC (`NamedParameterJdbcTemplate`) instead of JPA**: batch inserts with generated ids, explicit SQL,
-  no ORM surprises.
-- **Flyway**: each service migrates its own schema at startup.
-- **RabbitMQ** as the broker: the traffic is task distribution to one consumer, not an event log.
-  It gives durable queues, acks and retries through configuration, has first-class Spring support and is
-  light enough for a small host. Kafka/Redpanda (replay, partitions) were overkill; Redis Streams needs more
-  hand-written consumer code; Postgres-as-queue would have avoided a component but reads as dodging the
-  "choose a broker" requirement.
-- **Two services split at "detection vs. state"**: ingest-service decides that a condition holds and
-  publishes a self-contained event (severity, `resolve_after_s`, observation copies); alert-service owns
-  dedup and lifecycle and never calls back into ingest-service.
+## API
 
-## API behaviour
-
-- **Batches are partially accepted**: observations are independent readings, so one bad reading should not
-  throw away the good ones. Each rejected item is reported with its index and field. Status is **200** if
-  anything was stored and **422** if nothing was (207 is a WebDAV code; bulk APIs such as Elasticsearch
-  `_bulk` and Kinesis `PutRecords` also return 200 with per-item results). Trade-off: resending a partially
-  stored batch duplicates the stored items (no per-observation idempotency key).
-- Batch limit 1000 items (413 above that); errors are RFC 9457 problem details.
-- Timestamps are ISO-8601; values with an offset are normalised to UTC.
-- **Rules**: loaded from `rules.yaml` at startup with insert-if-absent semantics, so changes made through
-  the API survive restarts; an invalid file fails startup. Only `power_threshold` is implemented
-  (`multi_sensor` was optional and skipped).
+- **Batches are partially accepted**: readings are independent, so one bad item should not drop the rest.
+  200 if anything was stored (rejected items listed with index and field), 422 if nothing was, 413 above
+  1000 items. Trade-off: resending a partially stored batch duplicates the stored items.
+- Errors are RFC 9457 problem details; timestamps with an offset are normalised to UTC.
+- **Rules** load from `rules.yaml` at startup, insert-if-absent, so API changes survive restarts. Only
+  `power_threshold` is implemented (`multi_sensor` was optional).
 
 ## Event time, late and out-of-order data
 
-- All alert times (`first_seen`, `last_seen`) and the `min_duration_s` window use the **observation
-  timestamp**, never arrival time.
-- Each batch is evaluated in timestamp order; a window tracks `min(first)` / `max(last)`, so out-of-order
-  observations inside a window count correctly. An observation older than its window by more than the gap
-  is stored but not added to it.
-- `min_duration_s` needs persistence, not just two points: a gap larger than 5 s (`MAX_GAP`) restarts a
-  pending window, so two short bursts far apart never add up to an alert.
-- **Auto-resolve uses the clock to detect silence**: absence of data cannot be observed in event time
-  (no events arrive), so an alert resolves when its last observation (event time) is older than
-  `resolve_after_s` + 10 s grace relative to now. This assumes sensors report in near real time.
-  A pure event-time alternative (ingest publishes a watermark; alerts resolve against it) is listed below.
-- "Same signal" = same rule + frequency rounded to 0.1 MHz. Boundary effect: 2437.04 and 2437.06 MHz fall
-  into different buckets.
+- Alert times and the `min_duration_s` window use the **observation timestamp**, never arrival time.
+- A batch is evaluated in timestamp order and a window tracks `min(first)`/`max(last)`, so out-of-order
+  observations inside a window count. One older than its window by more than the gap is stored but not
+  counted.
+- A gap over 5 s (`MAX_GAP`) restarts a pending window, so short bursts never add up to an alert.
+- **Auto-resolve uses the clock**: silence cannot be seen in event time (no events arrive), so an alert
+  resolves when its last observation is older than `resolve_after_s` + 10 s grace relative to now. Assumes
+  sensors report in near real time.
+- Same signal = same rule + frequency rounded to 0.1 MHz (2437.04 and 2437.06 fall in different buckets).
 
 ## Reliability
 
-- **At-least-once delivery, idempotent consumer**: an alert's summary (occurrences, peak, sensors,
-  first/last seen) is derived from its stored observations, and an observation is stored once per alert
-  (primary key), so a redelivered event changes nothing.
-- **Dedup is enforced by the database**: a partial unique index allows one OPEN/ACKNOWLEDGED alert per
-  signal; the active alert is row-locked while an event updates it.
-- A failing message is retried 3 times with backoff, then logged and dropped (never requeued forever).
+- At-least-once delivery, idempotent consumer: an alert's summary is derived from its stored observations,
+  each stored once (primary key), so a redelivery changes nothing.
+- Dedup is enforced by the database: a partial unique index allows one OPEN/ACKNOWLEDGED alert per signal,
+  and the row is locked while updated.
+- A failing message is retried 3 times with backoff, then logged and dropped.
 
 ## Containers
 
-- One Dockerfile per service, each packaging only the jar Gradle built and CI tested (no compilation in
-  Docker, build context = the jar). `eclipse-temurin:17-jre-alpine`, non-root user, `HEALTHCHECK` on
-  `/health`, heap sized from the container memory limit (`MaxRAMPercentage=75`).
-- Compose: only nginx publishes a port; Postgres and RabbitMQ data in named volumes; health-gated
-  startup; `restart: unless-stopped`; `json-file` logs capped at 10 MB × 3 per container; 512 MB memory
-  limit per service. All configuration via environment variables from a gitignored `.env`.
+- Each image packages only the jar CI tested (no compilation in Docker): `temurin:17-jre-alpine`, non-root,
+  `HEALTHCHECK`, heap sized from the memory limit.
+- Compose: only nginx publishes a port; data in named volumes; health-gated startup;
+  `restart: unless-stopped`; logs capped at 10 MB × 3; config from a gitignored `.env`.
 
 ## CI/CD
 
-- GitHub Actions, one entry workflow (`pipeline.yml`) calling one reusable workflow per stage.
-  PRs run CI only; merges to `main` (or a manual run) run CI → Build & Publish → Deploy → Verify.
-- **Merge blocking**: the repository is public so branch protection is available; `main` requires a PR
-  and a passing `ci / Lint and test`.
-- **Lint**: a deliberately small Checkstyle rule set plus shellcheck.
-- **Images are tagged with the commit SHA** at publish; only after the smoke test passes does Verify add
-  the next version (`v0.1.0`, `v0.2.0`, … minor bump, shared by both images) and `latest` by re-tagging in
-  the registry (no rebuild), and create a GitHub Release. So `latest` and versions always point at
-  verified builds; tagging is serialized so two runs never take the same version.
-- **Caching**: Gradle build cache (persisted by `setup-gradle`) so unchanged modules are neither recompiled
-  nor retested; reproducible jars so an unchanged module gives a byte-identical jar; Docker layer cache
-  (GHA backend) so an unchanged jar is not re-packaged.
-- Secrets: the pipeline uses only the built-in `GITHUB_TOKEN` (GHCR push and pull). The stack's passwords
-  are generated on the VM at provisioning and never leave it.
+- GitHub Actions: `pipeline.yml` calls one reusable workflow per stage. PRs run CI only; merges to `main`
+  run CI → Build & Publish → Deploy → Verify. `main` is protected and requires the CI check.
+- Images are tagged with the commit SHA. Only after the smoke test passes does Verify add the next version
+  (`v0.N.0`) and `latest` by re-tagging (no rebuild), so versions always point at verified builds.
+- Secrets: only the built-in `GITHUB_TOKEN`. The stack's passwords are generated on the VM and never leave it.
 
 ## VM and deployment
 
-- **VM: Ubuntu 24.04 on Google Compute Engine** (`e2-medium`, 2 vCPU / 4 GB), created by `deploy/gcp-vm.sh`
-  (gcloud) and provisioned by `deploy/provision.sh`. A local VirtualBox VM (Vagrant) was tried first, since
-  Windows Home has no Hyper-V: on this host the Windows hypervisor is always on (virtualization-based
-  security, WSL2), so VirtualBox runs on top of it without VT-x. The guest booted only about 1 in 3 times
-  (hangs in early boot) and its clock ran 7-10x fast, which breaks every timer this system depends on.
-  Turning the Windows hypervisor off would fix that but also disables WSL2 and Docker Desktop. A cloud VM
-  avoids all of it. The free-tier `e2-micro` (1 GB) is too small for two JVMs, Postgres and RabbitMQ.
-  A gcloud script rather than Terraform: one VM, one network, two firewall rules, no state file to keep.
-- **Network**: a dedicated VPC whose firewall allows only tcp 22 and 80 (the `default` network also opens
-  RDP and ICMP), plus ufw on the host. SSH stays open for `gcloud compute ssh`; IAP-only SSH would be tighter.
-  A static IP, so a stop/start keeps the address.
-- **Version visible in GCP**: the VM's `app-version` label shows the running version tag
-  (`deploy/label-version.sh`): a deploy or rollback looks up the tag on the deployed commit (`unreleased`
-  until Verify tags a new one), and Verify sets it once the version is chosen. The VM runs as its own service
-  account (`rf-vm-sa`) with a custom role that can only read instances and set their labels, instead of the
-  default compute account (Editor on the project). No key is created; the VM gets tokens from the metadata
-  server. The pipeline cannot label the VM itself without a GCP credential in GitHub.
-- **Reaching the VM from CI: a self-hosted GitHub Actions runner on the VM.** The runner connects *out* to
-  GitHub and long-polls for jobs, so no SSH key or GCP credential is stored in GitHub, and the same design
-  works for a VM with no public IP at all (e.g. a local VM). Deploy, Verify and Rollback run on it (`runs-on: [self-hosted, rf-vm]`); CI and Build &
-  Publish stay on GitHub-hosted runners. Alternatives: SSH from a GitHub-hosted runner needs an SSH key (or
-  a GCP service-account key) as a repository secret and port 22 open to GitHub's whole IP range; a
-  pull-based agent (Watchtower) deploys whatever is pushed, so the pipeline could not run Verify against the
-  exact deployment or fail on it.
-- **Security of the runner**: the repository is public, and a self-hosted runner executes job code. Only
-  jobs gated to pushes on `main` and manual runs target it; pull requests only run CI on GitHub-hosted
-  runners. The runner user may use Docker (effectively root on the VM) but has no sudo. For a real system:
-  an ephemeral runner or a private repository.
-- **Deploy** (`deploy/deploy.sh <tag>`): copies the compose file and nginx config from the checkout to
-  `/opt/rf-alert-manager`, sets `IMAGE_TAG` in its `.env`, `docker compose pull` and `up -d --wait`, so the
-  step fails if a container does not become healthy. Exactly the `:<sha>` images CI built are deployed.
-- **Rollback**: automatic when Deploy (unhealthy) or Verify (smoke test) fails: `deploy.sh --previous`
-  returns to the last deployment that came up healthy (`history` on the VM, so a failed build is never a
-  rollback target, and repeated rollbacks keep going back). Manual: the Rollback workflow, with an empty
-  version (the previous deployment) or any published tag; every build stays in GHCR, so nothing is
-  rebuilt. The Rollback drill workflow proves the automatic path end to end with a broken release. Rollback
-  uses the current compose file and does not undo database migrations, so a migration must stay compatible
-  with the previous version (additive only).
-- **Start on boot**: Docker is enabled and every container has `restart: unless-stopped`; the runner is a
-  systemd service. **Ports**: ufw allows only 22 and 80, and only nginx publishes a port. **Logs**: Docker
-  `json-file` 10 MB × 3 per container (daemon default and compose), journald capped at 200 MB. The Google
-  Cloud Ops Agent tails the container log files into Cloud Logging (tagged with the compose service name)
-  and sends host metrics, so logs are searchable without SSH and outlive the local rotation. It costs about
-  150 MB of RAM; the service account gets only Logs Writer and Monitoring Metric Writer.
-- **Deployment is not zero-downtime**: `up -d` recreates the services, so requests fail for the few
-  seconds a Spring Boot service takes to start. Sensors would need to retry.
-- **Manual steps**: a GCP project with billing and a signed-in gcloud, and a runner registration token from
-  GitHub (valid one hour) passed to `deploy/gcp-vm.sh`. Everything else is code.
+- **Ubuntu 24.04 on GCP Compute Engine** (`e2-medium`, 4 GB; the free `e2-micro` is too small for two JVMs,
+  Postgres and RabbitMQ). Created by `deploy/gcp-vm.sh` (gcloud: one VM, one network, no state file, so no
+  Terraform) and provisioned by `deploy/provision.sh`. A local VirtualBox VM was tried first and dropped:
+  with the Windows hypervisor always on, the guest booted 1 in 3 times and its clock ran 7-10x fast.
+- **CI reaches the VM through a self-hosted runner on it.** The runner connects *out* to GitHub, so no SSH
+  key or cloud credential is stored in GitHub, and it would work for a VM with no public IP. SSH from a
+  hosted runner would need a key secret and port 22 open to GitHub; a pull agent (Watchtower) could not let
+  Verify fail the pipeline. Only `main` and manual runs reach the runner; PRs never do.
+- **Deploy** pulls exactly the `:<sha>` images and runs `up --wait`, so it fails if a container is unhealthy.
+- **Rollback**: automatic when Deploy or Verify fails, manual via the Rollback workflow. It returns to the
+  last deployment that came up healthy (a history on the VM, so a failed build is never a target). The
+  Rollback drill workflow tests the automatic path with a broken release. Migrations must stay additive,
+  because a rollback does not undo them.
+- **Hardening**: firewall and ufw allow only 22 and 80; static IP; boot starts Docker, the stack and the
+  runner; logs capped (Docker 10 MB × 3, journald 200 MB) and shipped to Cloud Logging by the Ops Agent.
+  The VM's service account may only read and label instances (the `app-version` label) and write logs and
+  metrics.
+- Not zero-downtime: `up -d` recreates the services, so requests fail for a few seconds.
 
 ## Not production-ready
 
-- **Event loss window**: if publishing to RabbitMQ fails after observations are stored, that match is lost
-  (logged). Fix: a transactional outbox.
-- **Rule-engine state is in memory**: windows are lost on restart, and running two ingest-service replicas
-  would split them. Fix: keep windows in Redis/Postgres, or partition by signal.
-- **No dead-letter queue**: a message that fails all retries is only logged.
-- **`GET /sensors` scans `observations`**; at volume this needs a maintained sensors table.
-- **No retention** for observations or alert observation copies.
-- **No authentication/authorization** and no TLS at nginx.
-- **No custom metrics** (only Spring's built-ins), no dashboards or alerting on the system itself.
-- One Postgres user for both schemas; no backups.
-- Auto-resolve depends on the host clock being roughly in sync with sensor clocks.
+- Event loss if publishing to RabbitMQ fails after the observations are stored (fix: transactional outbox).
+- Rule-engine windows live in memory: lost on restart, and two ingest replicas would split them.
+- No dead-letter queue, retention, authentication or TLS; no backups; one DB user for both schemas.
+- `GET /sensors` scans `observations`; at volume it needs its own table.
+- Single VM: a single point of failure. The runner can use Docker, which is effectively root on the VM.
 
 ## With more time
 
-1. Zero-downtime deployment (two replicas per service behind nginx, rolled one at a time); an ephemeral
-   runner.
-2. Transactional outbox for match events; dead-letter queue.
-3. Persist rule-engine windows so ingest-service is stateless and scalable.
-4. `multi_sensor` and `sensor_silence` rules.
-5. Prometheus + Grafana with a provisioned dashboard, and business metrics (observations accepted/rejected,
-   matches, alerts opened/resolved).
-6. Event-time auto-resolve via a watermark published by ingest-service.
-7. Retention policies, auth, TLS, separate DB users per service.
+1. Zero-downtime deploys (two replicas per service behind nginx) and an ephemeral runner.
+2. Transactional outbox and a dead-letter queue; persisted rule-engine windows.
+3. `multi_sensor` and `sensor_silence` rules.
+4. Prometheus + Grafana with business metrics; event-time auto-resolve via a watermark.
+5. Managed Postgres and RabbitMQ, retention, auth and TLS.
