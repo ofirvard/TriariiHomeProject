@@ -92,5 +92,5 @@
 1. Zero-downtime deploys (two replicas per service behind nginx) and an ephemeral runner.
 2. Transactional outbox and a dead-letter queue; persisted rule-engine windows.
 3. `multi_sensor` and `sensor_silence` rules.
-4. Prometheus + Grafana with business metrics; event-time auto-resolve via a watermark.
+4. Prometheus + Grafana with business metrics.
 5. Managed Postgres and RabbitMQ, retention, auth and TLS.
