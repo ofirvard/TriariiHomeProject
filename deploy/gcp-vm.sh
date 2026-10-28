@@ -27,8 +27,11 @@ fi
 if ! gc iam service-accounts describe "$SA" > /dev/null 2>&1; then
     gc iam service-accounts create rf-vm-sa --display-name "RF Alert Manager VM"
 fi
-gc projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" \
-    --role "projects/$PROJECT/roles/rfVmLabeler" --condition None > /dev/null
+# ... and the Ops Agent on it may write logs and metrics.
+for role in "projects/$PROJECT/roles/rfVmLabeler" roles/logging.logWriter roles/monitoring.metricWriter; do
+    gc projects add-iam-policy-binding "$PROJECT" --member "serviceAccount:$SA" --role "$role" \
+        --condition None > /dev/null
+done
 
 # A static address, so the VM keeps its IP across stop/start.
 gc compute addresses describe "$NAME-ip" --region "${ZONE%-*}" > /dev/null 2>&1 \
