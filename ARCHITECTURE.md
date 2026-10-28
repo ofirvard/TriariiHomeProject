@@ -103,7 +103,7 @@ Sensors are not a table: `GET /api/v1/sensors` is `max(ts)` per `sensor_id` over
 ```
 
 - Startup is health-gated: services wait for healthy Postgres/RabbitMQ; nginx waits for healthy services.
-- Configuration comes from `/opt/rf-alert-manager/.env` (passwords generated on the VM at provisioning, `IMAGE_TAG` set by each deploy); nothing secret is in the repo or images. `previous-tag` next to it records the deployment to roll back to.
+- Configuration comes from `/opt/rf-alert-manager/.env` (passwords generated on the VM at provisioning, `IMAGE_TAG` set by each deploy); nothing secret is in the repo or images. `history` next to it lists the deployments that came up healthy, which rollback walks back through.
 - Images: `ghcr.io/ofirvard/triariihomeproject/{ingest-service,alert-service}`, tagged with the commit SHA, the version (`v0.N.0`) and `latest`.
 
 ## CI/CD
@@ -123,3 +123,4 @@ manual:                rollback
 | `deploy.yml` | after publish | On the VM's self-hosted runner: `deploy/deploy.sh <sha>` pulls exactly the `:<sha>` images and restarts the stack (`up --wait`); if it is not healthy, restores the previous deployment. |
 | `verify.yml` | after deploy | On the VM: `deploy/smoke-test.sh` through nginx; on failure rolls back and fails. On success tags `v0.N.0` + `latest` (registry re-tag, no rebuild) and creates the GitHub Release. |
 | `rollback.yml` | manual | On the VM: redeploys a given tag (or the previous deployment) and smoke-tests it. |
+| `rollback-drill.yml` | manual | Builds a broken release (`:rollback-drill`), runs it through `deploy.yml` and `verify.yml` (no tagging), and confirms the VM rolled back to the previous version. |

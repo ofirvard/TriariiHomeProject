@@ -1,0 +1,79 @@
+# Rollback drill: Actions -> Rollback drill -> Run workflow. Ships a deliberately broken release through the
+# real Deploy and Verify stages and checks that the VM ends up back on the version it ran before.
+#   build     ingest-service from :latest with MAX_BATCH_SIZE=0: it starts and is healthy, but rejects every
+#             observation (a bad config shipped in a release); alert-service is :latest unchanged
+#   deploy    the normal Deploy stage: succeeds, the containers are healthy
+#   verify    the normal Verify stage, without tagging: the smoke test fails and rolls the VM back
+#   confirm   the VM runs the previous version again and passes the smoke test
+# The run is red (Verify fails, as it should); "Confirm the rollback" green is the drill passing.
+name: Rollback drill
+
+on:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io/ofirvard/triariihomeproject
+  TAG: rollback-drill
+
+jobs:
+  build:
+    name: Build a broken release
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the :rollback-drill images
+        run: |
+          printf 'FROM %s\nENV MAX_BATCH_SIZE=0\n' "$REGISTRY/ingest-service:latest" \
+            | docker build --push -t "$REGISTRY/ingest-service:$TAG" -
+          docker buildx imagetools create -t "$REGISTRY/alert-service:$TAG" "$REGISTRY/alert-service:latest"
+
+  deploy:
+    needs: build
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      image_tag: rollback-drill
+
+  verify:
+    needs: deploy
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/verify.yml
+    with:
+      image_tag: rollback-drill
+      release: false
+
+  confirm:
+    name: Confirm the rollback
+    needs: [deploy, verify]
+    if: always() && needs.deploy.result == 'success'
+    runs-on: [self-hosted, rf-vm]
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: The broken release is no longer running
+        run: |
+          running=$(sed -n 's/^IMAGE_TAG=//p' /opt/rf-alert-manager/.env)
+          echo "Running: $running"
+          if [[ "$running" == "$TAG" ]]; then
+            echo "The broken release is still deployed; rolling back" >&2
+            bash deploy/deploy.sh --previous
+            exit 1
+          fi
+
+      - name: Smoke test
+        run: bash deploy/smoke-test.sh http://localhost
