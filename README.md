@@ -176,8 +176,8 @@ Prerequisites: a GCP project with billing enabled (the free trial credit covers 
    ```
 
 The VM restarts everything on boot (Docker, the stack, the runner). The running version is the VM's
-`app-version` label (GCP console → Compute Engine → rf-vm, dots shown as dashes: `v0-3-0`), set by each
-deploy and rollback. To look at it: `gcloud compute ssh rf-vm --zone us-central1-a`, then
+`app-version` label (GCP console → Compute Engine → rf-vm, dots shown as dashes: `v0-4-0`), set by each
+deploy and rollback; a new commit shows `unreleased` until Verify gives it a version. To look at it: `gcloud compute ssh rf-vm --zone us-central1-a`, then
 `cd /opt/rf-alert-manager && docker compose ps`. To remove everything, delete the GCP project (or the VM,
 the `rf-vm-ip` address, the `rf-net` firewall rules and network, the `rf-vm-sa` service account and the
 `rfVmLabeler` role).
