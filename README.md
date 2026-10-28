@@ -182,6 +182,11 @@ deploy and rollback; a new commit shows `unreleased` until Verify gives it a ver
 the `rf-vm-ip` address, the `rf-net` firewall rules and network, the `rf-vm-sa` service account and the
 `rfVmLabeler` role).
 
+Logs: the Ops Agent sends every container's log to Cloud Logging. In the console, **Logging → Logs
+Explorer**, query `logName="projects/<gcp-project-id>/logs/docker"`, and narrow to one service with
+`jsonPayload.attrs."com.docker.compose.service"="alert-service"`. Host metrics (CPU, memory, disk) are on
+the VM's **Observability** tab. On the VM itself: `sudo docker compose logs -f` in `/opt/rf-alert-manager`.
+
 ### Rollback
 
 - **Automatic**: if the new containers do not become healthy (Deploy) or the smoke test fails (Verify), the
