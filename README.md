@@ -197,3 +197,32 @@ the VM's **Observability** tab. On the VM itself: `sudo docker compose logs -f` 
   (`MAX_BATCH_SIZE=0`: healthy, but rejects every observation) through the real Deploy and Verify stages.
   Deploy succeeds, Verify's smoke test fails and rolls back, and "Confirm the rollback" checks that the VM
   runs the previous version and passes the smoke test. The run is red because Verify fails, as it should.
+
+## Screenshots
+
+**The VM** on Compute Engine, with the deployed version as its `app-version` label:
+
+![VM instance rf-vm in the GCP console](screenshots/vm.png)
+
+**The running containers** on the VM (`docker compose ps`):
+
+![docker compose ps on the VM](screenshots/containers.png)
+
+**The simulator producing alerts**: two persistent emitters open alerts and the short burst does not. After
+the 2452 MHz emitter disappears (t+70s) its alert stops updating (43 occurrences) and later auto-resolves:
+
+![Simulator output](screenshots/simulator.png)
+
+The same alert opening, in Cloud Logging (alert-service log via the Ops Agent):
+
+![Logs Explorer showing the alert-service log line for the opened alert](screenshots/cloud-logging-alert.png)
+
+**A commit going through the pipeline to a live deployment**: CI → Build & Publish → Deploy to the VM → smoke
+test on the VM → version tag → version label on the VM:
+
+![Pipeline run](screenshots/pipeline.png)
+
+**Rollback drill**: a broken release is deployed, fails the smoke test and is rolled back automatically; no
+version is tagged, and "Confirm the rollback" checks the VM is back on the previous version:
+
+![Rollback drill run](screenshots/rollback-drill.png)
